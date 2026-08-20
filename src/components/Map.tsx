@@ -173,6 +173,11 @@ export const Map: React.FC<MapProps> = ({
     });
 
     clickMarkerRef.current = marker;
+
+    // Pan map to new selected location smoothly
+    map.flyTo([selectedLocation.lat, selectedLocation.lng], Math.max(map.getZoom(), 14), {
+      duration: 0.8,
+    });
   }, [selectedLocation, onMapClick]);
 
   // Update Route Polyline and Markers
@@ -368,7 +373,7 @@ export const Map: React.FC<MapProps> = ({
       <div ref={mapContainerRef} className="w-full h-full min-h-[440px] z-0 cursor-crosshair" />
 
       {/* Floating Tactical Overlay Controls */}
-      <div className="absolute top-4 right-4 z-[400] flex flex-col gap-2">
+      <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
         {/* Layer Selector */}
         <div className="relative">
           <button
@@ -445,7 +450,7 @@ export const Map: React.FC<MapProps> = ({
       </div>
 
       {/* Top Left Status Badge */}
-      <div className="absolute top-4 left-4 z-[400] flex flex-wrap items-center gap-2 pointer-events-none">
+      <div className="absolute top-4 left-4 z-20 flex flex-wrap items-center gap-2 pointer-events-none">
         {route ? (
           <div className="px-3.5 py-1.5 rounded-xl bg-white/95 dark:bg-[#19201D]/95 border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-md shadow-lg flex items-center gap-2">
             <span
