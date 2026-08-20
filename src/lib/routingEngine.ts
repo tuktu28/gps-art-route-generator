@@ -80,6 +80,9 @@ export async function fetchRealRoadPath(
             body: JSON.stringify({
               coordinates: waypoints.map(([lat, lng]) => [lng, lat]),
               preference: 'recommended',
+              options: {
+                avoid_features: ['highways', 'tollways', 'ferries'],
+              },
             }),
             signal: controller.signal,
           });
@@ -195,12 +198,12 @@ export async function snapWaypointsToRealRoads(
 
 /**
  * Strict Distance Enforcement Helper:
- * Ensures the final coordinate path is calibrated within ±5% of the target distance.
+ * Ensures the final coordinate path is calibrated within ±1% of the target distance.
  */
 export function enforceDistanceTolerance(
   coordinates: [number, number][],
   targetDistanceKm: number,
-  tolerancePercent: number = 0.05
+  tolerancePercent: number = 0.01
 ): [number, number][] {
   if (coordinates.length < 4) return coordinates;
 
@@ -335,8 +338,8 @@ export async function generateRoadGpsArtRoute(
       bestResult = snapped;
       const errorRatio = Math.abs(snapped.distanceKm - targetDistanceKm) / targetDistanceKm;
 
-      if (errorRatio <= 0.05) {
-        break; // Successfully within 5%!
+      if (errorRatio <= 0.01) {
+        break; // Successfully within 1%!
       }
 
       // Proportional box height adjustment for next pass
@@ -351,8 +354,8 @@ export async function generateRoadGpsArtRoute(
     finalCoords = buildGlyphWaypoints(currentBoxHeight);
   }
 
-  // Strictly enforce 5% limit
-  finalCoords = enforceDistanceTolerance(finalCoords, targetDistanceKm, 0.05);
+  // Strictly enforce 1% limit
+  finalCoords = enforceDistanceTolerance(finalCoords, targetDistanceKm, 0.01);
 
   const confidenceScore = Math.max(65, Math.min(95, Math.round(92 - tokens.length * 3.5)));
 
@@ -424,7 +427,7 @@ export async function generateRoadLoopRoute(
         bestCoords = result.coordinates;
       }
 
-      if (diff / targetDistanceKm <= 0.05) {
+      if (diff / targetDistanceKm <= 0.01) {
         break;
       }
 
@@ -437,7 +440,7 @@ export async function generateRoadLoopRoute(
     bestCoords = createLoopWaypoints(start, radiusKm, 8);
   }
 
-  return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.05);
+  return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.01);
 }
 
 /**
@@ -491,7 +494,7 @@ export async function generateRoadOutAndBackRoute(
         bestCoords = combined;
       }
 
-      if (diff / targetDistanceKm <= 0.05) {
+      if (diff / targetDistanceKm <= 0.01) {
         break;
       }
 
@@ -513,7 +516,7 @@ export async function generateRoadOutAndBackRoute(
     ];
   }
 
-  return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.05);
+  return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.01);
 }
 
 /**
