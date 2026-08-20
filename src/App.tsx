@@ -36,12 +36,15 @@ import {
   Footprints,
   Layers,
   MapPin,
+  Moon,
   Mountain,
   Navigation,
   Save,
   ShieldCheck,
   Sliders,
   Sparkles,
+  Sun,
+  Trees,
   Zap,
 } from 'lucide-react';
 
@@ -51,12 +54,38 @@ const DEFAULT_START_LOCATION: LatLng = {
 };
 
 export default function App() {
+  // Theme state (Light mode / Dark mode)
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('wayline_theme');
+      if (saved) return saved === 'dark';
+      return false; // Default to natural light mode
+    } catch {
+      return false;
+    }
+  });
+
+  // Sync theme with document class
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('wayline_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('wayline_theme', 'light');
+    }
+  }, [isDarkMode]);
+
+  const toggleTheme = () => {
+    setIsDarkMode((prev) => !prev);
+  };
+
   // Application State
   const [currentRoute, setCurrentRoute] = useState<GeneratedRoute | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LatLng>(DEFAULT_START_LOCATION);
   const [selectedAddress, setSelectedAddress] = useState<string>('Central Park, NYC');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [unit, setUnit] = useState<DistanceUnit>('km');
+  const [unit, setUnit] = useState<DistanceUnit>('mi');
 
   // Elevation Hover Synchronization
   const [hoveredElevationPoint, setHoveredElevationPoint] = useState<ElevationPoint | null>(null);
@@ -106,8 +135,7 @@ export default function App() {
   }) => {
     setIsLoading(true);
     try {
-      // Simulate microservice / ORS network latency for realism
-      await new Promise((res) => setTimeout(res, 600));
+      await new Promise((res) => setTimeout(res, 500));
 
       const route = await generateFullRoute({
         startLocation: params.startLocation,
@@ -142,7 +170,7 @@ export default function App() {
   const handleSaveCurrentRoute = async () => {
     if (!currentRoute) return;
 
-    setSaveStatus('Saving to Database...');
+    setSaveStatus('Saving...');
     const res = await saveRouteToSupabase(
       currentRoute,
       apiConfig.supabaseUrl,
@@ -150,7 +178,7 @@ export default function App() {
     );
 
     setSavedRoutes(getSavedRoutesFromLocal());
-    setSaveStatus('Route Saved!');
+    setSaveStatus('Saved!');
     setTimeout(() => setSaveStatus(null), 2500);
   };
 
@@ -179,36 +207,62 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-slate-950 font-sans">
+    <div className="min-h-screen bg-[#F8F6F0] dark:bg-[#121715] text-stone-800 dark:text-stone-100 flex flex-col font-sans transition-colors duration-200 selection:bg-[#2D4F3E] selection:text-white">
       {/* ================= HEADER NAVBAR ================= */}
-      <header className="sticky top-0 z-40 w-full bg-slate-950/90 border-b border-slate-800/80 backdrop-blur-xl px-4 lg:px-8 py-3 flex items-center justify-between">
-        {/* Brand */}
+      <header className="sticky top-0 z-40 w-full bg-[#FAF7F2]/90 dark:bg-[#161D1A]/90 border-b border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-md px-4 lg:px-8 py-3.5 flex items-center justify-between transition-colors shadow-xs">
+        {/* Brand Header */}
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-slate-950 font-extrabold text-lg">
-            <Compass className="w-5 h-5 text-slate-950 stroke-[2.5]" />
+          <div className="w-10 h-10 rounded-2xl bg-[#2D4F3E] dark:bg-[#3D6B56] flex items-center justify-center shadow-md shadow-[#2D4F3E]/20 text-white font-serif">
+            <Compass className="w-5 h-5 stroke-[2.2]" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-sm sm:text-base font-black tracking-tight text-white">
-                ROUTECRAFT <span className="text-emerald-400">SPATIAL</span>
+              <h1 className="text-base sm:text-lg font-bold font-serif tracking-wide text-stone-900 dark:text-stone-50">
+                Wayline <span className="font-sans text-xs font-semibold px-2 py-0.5 rounded-full bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/30 text-[#2D4F3E] dark:text-[#7EB89B] border border-[#2D4F3E]/20">Route Studio</span>
               </h1>
-              <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-mono font-bold border border-purple-500/30">
-                GPS ART ENGINE
-              </span>
             </div>
-            <p className="text-[11px] text-slate-400 hidden sm:block">
-              Privacy-First Route Generator & PostGIS Spatial Mesh
+            <p className="text-[11px] text-stone-500 dark:text-stone-400 hidden sm:block">
+              Curated Trails, Adaptive Street Loops & GPS Art Studio
             </p>
           </div>
         </div>
 
-        {/* Action Controls */}
+        {/* Action Controls & Theme Toggle */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Light / Dark Mode Toggle */}
+          <button
+            id="theme-mode-toggle-btn"
+            onClick={toggleTheme}
+            title={isDarkMode ? 'Switch to Natural Light Mode' : 'Switch to Dark Forest Mode'}
+            className="p-2 rounded-xl bg-white dark:bg-[#1E2723] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:text-[#2D4F3E] dark:hover:text-[#7EB89B] shadow-xs transition-all cursor-pointer flex items-center gap-1.5 text-xs font-medium"
+          >
+            {isDarkMode ? (
+              <>
+                <Sun className="w-4 h-4 text-[#DFBD84]" />
+                <span className="hidden md:inline text-[11px]">Light</span>
+              </>
+            ) : (
+              <>
+                <Moon className="w-4 h-4 text-[#2D4F3E]" />
+                <span className="hidden md:inline text-[11px]">Dark</span>
+              </>
+            )}
+          </button>
+
+          {/* Distance Unit Toggle */}
+          <button
+            onClick={() => setUnit((prev) => (prev === 'mi' ? 'km' : 'mi'))}
+            title="Toggle Distance Units (Miles / Kilometers)"
+            className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-[#1E2723] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:text-[#2D4F3E] dark:hover:text-[#7EB89B] shadow-xs text-xs font-mono font-bold transition-all cursor-pointer"
+          >
+            {unit.toUpperCase()}
+          </button>
+
           {/* Master Deployment Guide CTA */}
           <button
             id="open-master-guide-btn"
             onClick={() => setIsGuideModalOpen(true)}
-            className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-purple-600/25 transition-all cursor-pointer"
+            className="px-3 py-1.5 rounded-xl bg-[#8C6838] hover:bg-[#73532B] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
           >
             <BookOpen className="w-3.5 h-3.5" />
             <span className="hidden md:inline">Master Blueprint</span>
@@ -219,12 +273,12 @@ export default function App() {
           <button
             id="open-saved-routes-btn"
             onClick={() => setIsSavedModalOpen(true)}
-            className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all"
+            className="px-3 py-1.5 rounded-xl bg-white dark:bg-[#1E2723] border border-[#E5DFD3] dark:border-[#2E3C34] hover:border-[#2D4F3E]/40 text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
           >
-            <Bookmark className="w-3.5 h-3.5 text-emerald-400" />
+            <Bookmark className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
             <span className="hidden sm:inline">Library</span>
             {savedRoutes.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-mono font-bold">
+              <span className="px-1.5 py-0.2 rounded-full bg-[#2D4F3E] text-white text-[10px] font-mono font-bold">
                 {savedRoutes.length}
               </span>
             )}
@@ -235,9 +289,9 @@ export default function App() {
             id="open-api-settings-btn"
             onClick={() => setIsSettingsModalOpen(true)}
             title="Configure APIs & Microservice"
-            className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white transition-all"
+            className="p-2 rounded-xl bg-white dark:bg-[#1E2723] border border-[#E5DFD3] dark:border-[#2E3C34] hover:border-[#2D4F3E]/40 text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white shadow-xs transition-all cursor-pointer"
           >
-            <Sliders className="w-4 h-4 text-cyan-400" />
+            <Sliders className="w-4 h-4 text-[#C86432]" />
           </button>
         </div>
       </header>
@@ -246,23 +300,23 @@ export default function App() {
       <main className="flex-1 w-full max-w-[1700px] mx-auto p-3 sm:p-5 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* LEFT COLUMN: Route Designer Controls (4 cols on lg) */}
         <aside className="lg:col-span-4 flex flex-col gap-4">
-          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800/90 backdrop-blur-xl shadow-2xl flex flex-col gap-4">
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+          <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm flex flex-col gap-4 transition-colors">
+            <div className="flex items-center justify-between border-b border-[#E5DFD3] dark:border-[#2E3C34] pb-3">
               <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  <Zap className="w-4 h-4" />
+                <div className="p-1.5 rounded-lg bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 text-[#2D4F3E] dark:text-[#7EB89B] border border-[#2D4F3E]/20">
+                  <Trees className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                    Route Architect
+                  <h2 className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wider">
+                    Route Studio
                   </h2>
-                  <p className="text-[11px] text-slate-400">Configure parameters & spatial fit</p>
+                  <p className="text-[11px] text-stone-500 dark:text-stone-400">Configure parameters, mileage & terrain fit</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5 text-[10px] font-mono text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                <span>ONLINE</span>
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#2D4F3E] dark:text-[#7EB89B] bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/20 px-2 py-0.5 rounded-md border border-[#2D4F3E]/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2D4F3E] dark:bg-[#7EB89B]" />
+                <span>READY</span>
               </div>
             </div>
 
@@ -281,10 +335,10 @@ export default function App() {
           </div>
 
           {/* Privacy & SOC2 Architectural Card */}
-          <div className="p-4 rounded-2xl bg-slate-900/50 border border-slate-800 text-xs text-slate-400 space-y-2">
-            <div className="flex items-center gap-2 text-slate-200 font-semibold">
-              <ShieldCheck className="w-4 h-4 text-blue-400" />
-              <span>Spatial Privacy & PII Protection</span>
+          <div className="p-4 rounded-2xl bg-white/70 dark:bg-[#19201D]/70 border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-stone-600 dark:text-stone-400 space-y-2 transition-colors">
+            <div className="flex items-center gap-2 text-stone-800 dark:text-stone-200 font-semibold">
+              <ShieldCheck className="w-4 h-4 text-[#2D4F3E] dark:text-[#7EB89B]" />
+              <span>Spatial Privacy & Doorstep Protection</span>
             </div>
             <p className="text-[11px] leading-relaxed">
               PostGIS spatial engine automatically masks user doorstep origins: routes &gt;5km are truncated 500m from start/end; routes &le;5km apply 500m spatial jitter to prevent personal location leakage.
@@ -295,13 +349,14 @@ export default function App() {
         {/* RIGHT COLUMN: Map, Telemetry HUD, & Elevation Chart (8 cols on lg) */}
         <section className="lg:col-span-8 flex flex-col gap-4 min-w-0">
           {/* Top Leaflet Map Section */}
-          <div className="w-full h-[460px] sm:h-[500px] relative">
+          <div className="w-full h-[460px] sm:h-[500px] relative rounded-3xl overflow-hidden shadow-sm border border-[#E5DFD3] dark:border-[#2E3C34]">
             <Map
               route={currentRoute}
               hoveredElevationPoint={hoveredElevationPoint}
               onMapClick={handleMapClick}
               selectedLocation={selectedLocation}
               showPrivacyBuffer={true}
+              isDarkMode={isDarkMode}
             />
           </div>
 
@@ -309,49 +364,49 @@ export default function App() {
           {currentRoute ? (
             <div
               id="route-telemetry-bar"
-              className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl backdrop-blur-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+              className="p-4 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-colors"
             >
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full sm:w-auto font-mono text-xs">
                 {/* Distance */}
                 <div className="flex flex-col">
-                  <span className="text-[10px] text-slate-500 uppercase">Distance</span>
-                  <span className="text-base font-bold text-emerald-400">
+                  <span className="text-[10px] text-stone-500 uppercase tracking-wider">Distance</span>
+                  <span className="text-base font-bold text-[#2D4F3E] dark:text-[#7EB89B]">
                     {unit === 'km' ? currentRoute.stats.distanceKm : currentRoute.stats.distanceMi}{' '}
-                    <span className="text-xs text-slate-400">{unit}</span>
+                    <span className="text-xs text-stone-500">{unit}</span>
                   </span>
                 </div>
 
                 {/* Duration */}
                 <div className="flex flex-col">
-                  <span className="text-[10px] text-slate-500 uppercase">Est. Duration</span>
-                  <span className="text-base font-bold text-slate-100 flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="text-[10px] text-stone-500 uppercase tracking-wider">Est. Duration</span>
+                  <span className="text-base font-bold text-stone-800 dark:text-stone-100 flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-[#8C6838] dark:text-[#DFBD84]" />
                     {currentRoute.stats.estimatedDurationMinutes}m
                   </span>
                 </div>
 
                 {/* Elevation */}
                 <div className="flex flex-col">
-                  <span className="text-[10px] text-slate-500 uppercase">Climb Gain</span>
-                  <span className="text-base font-bold text-slate-100 flex items-center gap-1">
-                    <Mountain className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="text-[10px] text-stone-500 uppercase tracking-wider">Climb Gain</span>
+                  <span className="text-base font-bold text-stone-800 dark:text-stone-100 flex items-center gap-1">
+                    <Mountain className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
                     +{currentRoute.stats.elevationGainM}m
                   </span>
                 </div>
 
                 {/* Calories / Confidence */}
                 <div className="flex flex-col">
-                  <span className="text-[10px] text-slate-500 uppercase">
-                    {currentRoute.routeType === 'gps_art' ? 'Art Match Fit' : 'Est. Burn'}
+                  <span className="text-[10px] text-stone-500 uppercase tracking-wider">
+                    {currentRoute.routeType === 'gps_art' ? 'Art Precision' : 'Est. Calories'}
                   </span>
                   {currentRoute.routeType === 'gps_art' ? (
-                    <span className="text-base font-bold text-purple-400 flex items-center gap-1">
-                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                    <span className="text-base font-bold text-[#8C6838] dark:text-[#DFBD84] flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-[#8C6838] dark:text-[#DFBD84]" />
                       {currentRoute.stats.confidenceScore}%
                     </span>
                   ) : (
-                    <span className="text-base font-bold text-rose-400 flex items-center gap-1">
-                      <Flame className="w-3.5 h-3.5 text-rose-400" />
+                    <span className="text-base font-bold text-[#C86432] flex items-center gap-1">
+                      <Flame className="w-3.5 h-3.5 text-[#C86432]" />
                       {currentRoute.stats.estimatedCalories} kcal
                     </span>
                   )}
@@ -359,22 +414,22 @@ export default function App() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-2 w-full sm:w-auto justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-800">
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-[#E5DFD3] dark:border-[#2E3C34]">
                 {/* Save Route CTA */}
                 <button
                   id="save-route-to-db-btn"
                   onClick={handleSaveCurrentRoute}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
+                  className="px-3.5 py-2 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#ECE5D8] dark:hover:bg-[#2F3D35] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
                 >
                   {saveStatus ? (
                     <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-emerald-400">{saveStatus}</span>
+                  <Check className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
+                  <span className="text-[#2D4F3E] dark:text-[#7EB89B]">{saveStatus}</span>
                     </>
                   ) : (
                     <>
-                      <Save className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Save Route</span>
+                  <Save className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
+                  <span>Save Route</span>
                     </>
                   )}
                 </button>
@@ -383,7 +438,7 @@ export default function App() {
                 <button
                   id="download-gpx-btn"
                   onClick={() => downloadGpxFile(currentRoute)}
-                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-[#2D4F3E] hover:bg-[#233F31] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5 stroke-[2.5]" />
                   <span>Export .GPX</span>
