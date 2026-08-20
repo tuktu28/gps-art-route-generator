@@ -296,27 +296,45 @@ export default function App() {
         </div>
       </header>
 
+      {/* ================= EDITORIAL HERO SECTION ================= */}
+      <section className="w-full max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-2">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#E5DFD3] dark:border-[#2E3C34] pb-5">
+          <div className="flex flex-col gap-1.5">
+            {/* Eyebrow */}
+            <div className="flex items-center gap-2 text-[11px] font-bold tracking-widest uppercase text-stone-600 dark:text-stone-400">
+              <span className="w-2 h-2 rounded-full bg-[#D98A3C]" />
+              <span>MAKE A WAYLINE</span>
+            </div>
+
+            {/* Poetic Serif Title */}
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-serif font-bold text-stone-900 dark:text-stone-50 tracking-tight leading-none">
+              Go somewhere <span className="italic font-normal text-[#365D48] dark:text-[#7EB89B]">on purpose.</span>
+            </h2>
+          </div>
+
+          {/* Editorial Note with Amber Bar */}
+          <div className="max-w-md border-l-2 border-[#D98A3C] pl-3.5 py-0.5">
+            <p className="text-xs sm:text-[13px] text-stone-600 dark:text-stone-300 italic font-serif leading-relaxed">
+              Start with a few deliberate parameters. Preview the shape, then save a route you&apos;ll want to go outside for.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* ================= MAIN CONTENT WORKSPACE ================= */}
       <main className="flex-1 w-full max-w-[1700px] mx-auto p-3 sm:p-5 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* LEFT COLUMN: Route Designer Controls (4 cols on lg) */}
         <aside className="lg:col-span-4 flex flex-col gap-4">
           <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm flex flex-col gap-4 transition-colors">
             <div className="flex items-center justify-between border-b border-[#E5DFD3] dark:border-[#2E3C34] pb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 text-[#2D4F3E] dark:text-[#7EB89B] border border-[#2D4F3E]/20">
-                  <Trees className="w-4 h-4" />
-                </div>
-                <div>
-                  <h2 className="text-xs font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wider">
-                    Route Studio
-                  </h2>
-                  <p className="text-[11px] text-stone-500 dark:text-stone-400">Configure parameters, mileage & terrain fit</p>
-                </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-[#D98A3C] font-bold">ROUTE RECIPE</span>
+                <h3 className="text-lg font-serif font-bold text-stone-900 dark:text-stone-100">Set the feeling.</h3>
               </div>
 
-              <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#2D4F3E] dark:text-[#7EB89B] bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/20 px-2 py-0.5 rounded-md border border-[#2D4F3E]/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#2D4F3E] dark:bg-[#7EB89B]" />
-                <span>READY</span>
+              <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#2D4F3E] dark:text-[#7EB89B] bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/20 px-2.5 py-1 rounded-full border border-[#2D4F3E]/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2D4F3E] dark:bg-[#7EB89B] animate-pulse" />
+                <span>{isLoading ? 'CALCULATING' : 'READY'}</span>
               </div>
             </div>
 
@@ -349,7 +367,25 @@ export default function App() {
         {/* RIGHT COLUMN: Map, Telemetry HUD, & Elevation Chart (8 cols on lg) */}
         <section className="lg:col-span-8 flex flex-col gap-4 min-w-0">
           {/* Top Leaflet Map Section */}
-          <div className="w-full h-[460px] sm:h-[500px] relative rounded-3xl overflow-hidden shadow-sm border border-[#E5DFD3] dark:border-[#2E3C34]">
+          <div className="w-full h-[460px] sm:h-[520px] relative rounded-3xl overflow-hidden shadow-sm border border-[#E5DFD3] dark:border-[#2E3C34] group">
+            {/* Floating Map Status Badges matching Screenshot */}
+            <div className="absolute top-3.5 left-3.5 z-[500] pointer-events-none flex items-center gap-2 flex-wrap">
+              <div className="px-3 py-1 rounded-full bg-[#FAF7F2]/95 dark:bg-[#161D1A]/95 border border-[#E5DFD3] dark:border-[#2E3C34] shadow-md backdrop-blur-sm text-[11px] font-mono font-bold text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+                <span className="text-[#365D48] dark:text-[#7EB89B]">PREVIEW / 01</span>
+                <span className="text-stone-400 dark:text-stone-600">•</span>
+                <span>
+                  {currentRoute
+                    ? `${unit === 'km' ? currentRoute.stats.distanceKm : currentRoute.stats.distanceMi} ${unit} ${currentRoute.routeType.replace('_', ' ')}`
+                    : `Set trailhead & distance`}
+                </span>
+              </div>
+
+              <div className="px-2.5 py-1 rounded-full bg-[#FAF7F2]/95 dark:bg-[#161D1A]/95 border border-[#E5DFD3] dark:border-[#2E3C34] shadow-md backdrop-blur-sm text-[10px] font-mono text-stone-700 dark:text-stone-300 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#D98A3C]" />
+                <span className="uppercase font-semibold">{currentRoute ? 'ACTIVE ROUTE' : 'DRAG PIN TO MOVE'}</span>
+              </div>
+            </div>
+
             <Map
               route={currentRoute}
               hoveredElevationPoint={hoveredElevationPoint}
