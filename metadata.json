@@ -1,6 +1,6 @@
 {
-  "name": "Route Generator",
-  "description": "Privacy-first spatial route and GPS Art generator for runners, cyclists, and hikers with elevation analytics, PostGIS privacy masking, and GPX export.",
+  "name": "Wayline - Route Studio",
+  "description": "Editorial spatial route and GPS Art studio for runners, hikers, and cyclists with real-road snapping, elevation analytics, PostGIS privacy masking, and GPX export.",
   "requestFramePermissions": [
     "geolocation"
   ],
