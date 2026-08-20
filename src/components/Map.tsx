@@ -126,7 +126,7 @@ export const Map: React.FC<MapProps> = ({
     tileLayerRef.current = newLayer;
   }, [activeTile]);
 
-  // Update Selected Location Marker (when no route or when picking on map)
+  // Update Selected Location Marker (Always active & draggable for seamless re-routing)
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
@@ -136,46 +136,44 @@ export const Map: React.FC<MapProps> = ({
       clickMarkerRef.current = null;
     }
 
-    if (!route) {
-      const pinHtml = `
-        <div class="relative flex items-center justify-center cursor-pointer group">
-          <div class="absolute w-9 h-9 rounded-full bg-[#3D6B56]/30 dark:bg-[#5C8E76]/30 animate-ping"></div>
-          <div class="w-7 h-7 rounded-full bg-[#2D4F3E] dark:bg-[#436E58] border-2 border-white dark:border-[#121614] flex items-center justify-center shadow-xl text-white font-bold text-xs transform transition-transform group-hover:scale-110">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-          </div>
+    const pinHtml = `
+      <div class="relative flex items-center justify-center cursor-pointer group">
+        <div class="absolute w-10 h-10 rounded-full bg-[#2D4F3E]/30 dark:bg-[#5C8E76]/35 animate-ping"></div>
+        <div class="w-8 h-8 rounded-full bg-[#2D4F3E] dark:bg-[#436E58] border-2 border-white dark:border-[#121614] flex items-center justify-center shadow-xl text-white font-bold text-xs transform transition-transform group-hover:scale-115">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
         </div>
-      `;
-      const icon = L.divIcon({
-        className: 'custom-start-icon',
-        html: pinHtml,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
-      });
+      </div>
+    `;
+    const icon = L.divIcon({
+      className: 'custom-start-icon',
+      html: pinHtml,
+      iconSize: [40, 40],
+      iconAnchor: [20, 20],
+    });
 
-      const marker = L.marker([selectedLocation.lat, selectedLocation.lng], {
-        icon,
-        draggable: true,
-      }).addTo(map);
+    const marker = L.marker([selectedLocation.lat, selectedLocation.lng], {
+      icon,
+      draggable: true,
+      zIndexOffset: 1000,
+    }).addTo(map);
 
-      marker.bindPopup(
-        `<div class="p-1 font-sans">
-          <b class="text-xs font-semibold text-[#2D4F3E] dark:text-[#7EB89B]">Selected Start Point</b>
-          <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-0.5">Drag pin or click map to move</p>
-          <span class="text-[10px] font-mono text-stone-500">${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}</span>
-        </div>`
-      );
+    marker.bindPopup(
+      `<div class="p-1.5 font-sans">
+        <b class="text-xs font-semibold text-[#2D4F3E] dark:text-[#7EB89B]">Starting Point / Trailhead</b>
+        <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-0.5">Drag to reposition or click anywhere on the map</p>
+        <div class="mt-1 text-[10px] font-mono text-stone-500">${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}</div>
+      </div>`
+    );
 
-      marker.on('dragend', (e) => {
-        const newPos = (e.target as L.Marker).getLatLng();
-        if (onMapClick) {
-          onMapClick({ lat: newPos.lat, lng: newPos.lng });
-        }
-      });
+    marker.on('dragend', (e) => {
+      const newPos = (e.target as L.Marker).getLatLng();
+      if (onMapClick) {
+        onMapClick({ lat: newPos.lat, lng: newPos.lng });
+      }
+    });
 
-      clickMarkerRef.current = marker;
-      map.setView([selectedLocation.lat, selectedLocation.lng], map.getZoom());
-    }
-  }, [selectedLocation, route]);
+    clickMarkerRef.current = marker;
+  }, [selectedLocation, onMapClick]);
 
   // Update Route Polyline and Markers
   useEffect(() => {
@@ -224,13 +222,12 @@ export const Map: React.FC<MapProps> = ({
       lineJoin: 'round',
     }).addTo(map);
 
-    // Start Marker (Earthy Green & Ochre badge)
+    // Start Marker on the route line
     const startCoord = route.coordinates[0];
     const startIcon = L.divIcon({
       className: 'route-start-pin',
       html: `
         <div class="relative flex items-center justify-center">
-          <div class="absolute w-8 h-8 rounded-full bg-[#2D4F3E]/30 dark:bg-[#5C8E76]/40 animate-ping"></div>
           <div class="w-6 h-6 rounded-full bg-[#2D4F3E] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[10px] font-extrabold tracking-tighter">
             GO
           </div>
