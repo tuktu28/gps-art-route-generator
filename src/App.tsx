@@ -209,7 +209,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F8F6F0] dark:bg-[#121715] text-stone-800 dark:text-stone-100 flex flex-col font-sans transition-colors duration-200 selection:bg-[#2D4F3E] selection:text-white">
       {/* ================= HEADER NAVBAR ================= */}
-      <header className="sticky top-0 z-40 w-full bg-[#FAF7F2]/90 dark:bg-[#161D1A]/90 border-b border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-md px-4 lg:px-8 py-3.5 flex items-center justify-between transition-colors shadow-xs">
+      <header className="sticky top-0 z-50 w-full bg-[#FAF7F2]/95 dark:bg-[#161D1A]/95 border-b border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-md px-4 lg:px-8 py-3.5 flex items-center justify-between transition-colors shadow-xs">
         {/* Brand Header */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-[#2D4F3E] dark:bg-[#3D6B56] flex items-center justify-center shadow-md shadow-[#2D4F3E]/20 text-white font-serif">
@@ -369,7 +369,7 @@ export default function App() {
           {/* Top Leaflet Map Section */}
           <div className="w-full h-[460px] sm:h-[520px] relative rounded-3xl overflow-hidden shadow-sm border border-[#E5DFD3] dark:border-[#2E3C34] group">
             {/* Floating Map Status Badges matching Screenshot */}
-            <div className="absolute top-3.5 left-3.5 z-[500] pointer-events-none flex items-center gap-2 flex-wrap">
+            <div className="absolute top-3.5 left-3.5 z-20 pointer-events-none flex items-center gap-2 flex-wrap">
               <div className="px-3 py-1 rounded-full bg-[#FAF7F2]/95 dark:bg-[#161D1A]/95 border border-[#E5DFD3] dark:border-[#2E3C34] shadow-md backdrop-blur-sm text-[11px] font-mono font-bold text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
                 <span className="text-[#365D48] dark:text-[#7EB89B]">PREVIEW / 01</span>
                 <span className="text-stone-400 dark:text-stone-600">•</span>
