@@ -65,6 +65,7 @@ export const Map: React.FC<MapProps> = ({
   const privacyCircleStartRef = useRef<L.Circle | null>(null);
   const privacyCircleEndRef = useRef<L.Circle | null>(null);
   const clickMarkerRef = useRef<L.Marker | null>(null);
+  const directionalMarkersRef = useRef<L.Marker[]>([]);
 
   const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'outdoors');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -192,6 +193,8 @@ export const Map: React.FC<MapProps> = ({
     if (endMarkerRef.current) map.removeLayer(endMarkerRef.current);
     if (privacyCircleStartRef.current) map.removeLayer(privacyCircleStartRef.current);
     if (privacyCircleEndRef.current) map.removeLayer(privacyCircleEndRef.current);
+    directionalMarkersRef.current.forEach((m) => map.removeLayer(m));
+    directionalMarkersRef.current = [];
 
     if (!route || route.coordinates.length === 0) return;
 
@@ -226,6 +229,41 @@ export const Map: React.FC<MapProps> = ({
       lineCap: 'round',
       lineJoin: 'round',
     }).addTo(map);
+
+    // Directional chevron arrows along the route showing travel direction
+    if (route.coordinates.length >= 6) {
+      const numArrows = Math.min(12, Math.max(4, Math.floor(route.coordinates.length / 15)));
+      const step = Math.floor(route.coordinates.length / (numArrows + 1));
+
+      for (let i = step; i < route.coordinates.length - 2; i += step) {
+        const p1 = route.coordinates[i];
+        const p2 = route.coordinates[i + 1];
+        const lat1 = (p1[0] * Math.PI) / 180;
+        const lat2 = (p2[0] * Math.PI) / 180;
+        const dLng = ((p2[1] - p1[1]) * Math.PI) / 180;
+        const y = Math.sin(dLng) * Math.cos(lat2);
+        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+        const bearing = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+
+        const arrowIcon = L.divIcon({
+          className: 'route-directional-arrow',
+          html: `
+            <div style="transform: rotate(${bearing}deg);" class="flex items-center justify-center pointer-events-none">
+              <div style="background-color: ${strokeColor};" class="w-4 h-4 rounded-full border border-white dark:border-stone-900 shadow-md flex items-center justify-center text-white">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+              </div>
+            </div>
+          `,
+          iconSize: [16, 16],
+          iconAnchor: [8, 8],
+        });
+
+        const arrowMarker = L.marker(p1, { icon: arrowIcon, interactive: false }).addTo(map);
+        directionalMarkersRef.current.push(arrowMarker);
+      }
+    }
 
     // Start Marker on the route line
     const startCoord = route.coordinates[0];
@@ -447,41 +485,6 @@ export const Map: React.FC<MapProps> = ({
         >
           {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
         </button>
-      </div>
-
-      {/* Top Left Status Badge */}
-      <div className="absolute top-4 left-4 z-20 flex flex-wrap items-center gap-2 pointer-events-none">
-        {route ? (
-          <div className="px-3.5 py-1.5 rounded-xl bg-white/95 dark:bg-[#19201D]/95 border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-md shadow-lg flex items-center gap-2">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                route.routeType === 'gps_art'
-                  ? 'bg-[#8A4A72]'
-                  : route.activity === 'bike'
-                  ? 'bg-[#C86432]'
-                  : 'bg-[#2D4F3E] dark:bg-[#8EB39F]'
-              }`}
-            />
-            <span className="text-xs font-semibold text-[#1E2A24] dark:text-[#E8EAE6]">
-              {route.name}
-            </span>
-            <span className="text-[11px] font-mono text-stone-500 dark:text-stone-400">
-              {route.stats.distanceKm} km
-            </span>
-          </div>
-        ) : (
-          <div className="px-3.5 py-1.5 rounded-xl bg-white/95 dark:bg-[#19201D]/95 border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-md shadow-lg flex items-center gap-2 text-xs text-[#2D4F3E] dark:text-[#8EB39F] font-medium">
-            <MapPin className="w-3.5 h-3.5 text-[#C86432]" />
-            <span>Click map to place start point or drag pin</span>
-          </div>
-        )}
-
-        {route?.privacy.applied && (
-          <div className="px-2.5 py-1 rounded-xl bg-[#EAF2ED] dark:bg-[#162920] border border-[#B7D4C4] dark:border-[#2F4D3C] backdrop-blur-md shadow-sm flex items-center gap-1.5 text-[11px] text-[#2D4F3E] dark:text-[#8EB39F] font-medium">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#8EB39F]" />
-            <span>500m Privacy Protected</span>
-          </div>
-        )}
       </div>
 
       {/* Coordinate & Scale HUD (Bottom Left) */}

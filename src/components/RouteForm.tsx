@@ -53,7 +53,6 @@ const PRESET_CITIES = [
   { name: 'Golden Gate, San Francisco', lat: 37.802375, lng: -122.405823 },
   { name: 'Seine River, Paris', lat: 48.856614, lng: 2.352222 },
   { name: 'Boulder Trails, Colorado', lat: 40.014986, lng: -105.270546 },
-  { name: 'Yoyogi Park, Tokyo', lat: 35.671989, lng: 139.696372 },
 ];
 
 const GPS_ART_PRESETS = [
@@ -205,10 +204,10 @@ export const RouteForm: React.FC<RouteFormProps> = ({
     });
   };
 
-  // Preset Distance Chips
+  // Preset Distance Chips (including 20 miles and 26.2 marathon miles)
   const distancePresets = unit === 'mi'
-    ? [3.1, 5.0, 6.2, 10.0, 13.1]
-    : [5.0, 8.0, 10.0, 15.0, 21.1];
+    ? [3.1, 5.0, 6.2, 10.0, 13.1, 20.0, 26.2]
+    : [5.0, 8.0, 10.0, 15.0, 21.1, 32.2, 42.2];
 
   return (
     <form
@@ -403,7 +402,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
           <div className="p-2.5 rounded-xl bg-[#8A4A72]/15 dark:bg-[#8A4A72]/30 border border-[#8A4A72]/30 text-[11px] text-stone-700 dark:text-stone-300 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-[#C86432] shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong className="text-[#C86432]">Notice:</strong> GPS Art fits strokes to real street grids and keeps distance within ±5% tolerance.
+              <strong className="text-[#C86432]">Notice:</strong> GPS Art fits strokes to real street grids, strictly avoiding highways and keeping distance within ±1% tolerance.
             </p>
           </div>
         </div>
