@@ -397,28 +397,32 @@ export function generateGlyphPolyline(
   const rawPath: [number, number][] = [];
   let currentPos: [number, number] | null = null;
 
+  // Align the path origin so that rawPath[0] (top of first letter or origin) matches user start coordinate exactly
   tokens.forEach((char, index) => {
     const glyphPoints = CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['O'];
     const charOriginLng = start.lng + index * (charWidthDeg + spacingDeg);
     const charOriginLat = start.lat;
 
     // Map glyph 0..1 bounding box to geographic coordinates
+    // First glyph starts exactly at start.lat and start.lng
     const mappedPoints: [number, number][] = glyphPoints.map(([x, y]) => {
-      const geoLat = charOriginLat + y * heightDeg;
-      const geoLng = charOriginLng + x * charWidthDeg;
+      // If it's the very first letter and starts at top (y=1.0), offset base so start point is exactly at start coordinate
+      const geoLat = charOriginLat + (y - (index === 0 ? glyphPoints[0][1] : 0)) * heightDeg;
+      const geoLng = charOriginLng + (x - (index === 0 ? glyphPoints[0][0] : 0)) * charWidthDeg;
       return [geoLat, geoLng];
     });
 
     if (!currentPos) {
-      // First point of first letter (e.g. top of L)
+      // First point of first letter matches user start point exactly
+      rawPath.push([start.lat, start.lng]);
       rawPath.push(...mappedPoints);
       currentPos = mappedPoints[mappedPoints.length - 1];
     } else {
       // Create street-style connecting traverse along the baseline to next letter
       const nextLetterStart = mappedPoints[0];
       
-      // Step along baseline (Y = baseline) to maintain clean word typography
-      const baselineLat = charOriginLat;
+      // Step along baseline to maintain clean word typography
+      const baselineLat = charOriginLat - glyphPoints[0][1] * heightDeg;
       const transitionPt1: [number, number] = [baselineLat, currentPos[1]];
       const transitionPt2: [number, number] = [baselineLat, nextLetterStart[1]];
 
@@ -429,11 +433,11 @@ export function generateGlyphPolyline(
     }
   });
 
-  // Connect back to starting point along parallel southern street to complete the workout loop
+  // Connect back to starting point along parallel street to complete the workout loop
   if (currentPos && rawPath.length > 0) {
     const firstPoint = rawPath[0];
     const southernOffsetDeg = heightDeg * 0.22; // run along parallel avenue
-    const returnLat = start.lat - southernOffsetDeg;
+    const returnLat = Math.min(start.lat, currentPos[0]) - southernOffsetDeg;
 
     // Corner down to southern parallel street
     rawPath.push([returnLat, currentPos[1]]);
