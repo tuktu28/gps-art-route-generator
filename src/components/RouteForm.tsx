@@ -123,6 +123,15 @@ export const RouteForm: React.FC<RouteFormProps> = ({
           const data: NominatimResult[] = await response.json();
           setSearchResults(data);
           setShowDropdown(true);
+
+          // Auto-center map if exact or high-confidence match is found
+          if (data && data.length > 0) {
+            const firstLat = parseFloat(data[0].lat);
+            const firstLng = parseFloat(data[0].lon);
+            if (!isNaN(firstLat) && !isNaN(firstLng)) {
+              onLocationChange({ lat: firstLat, lng: firstLng }, data[0].display_name);
+            }
+          }
         }
       } catch (err) {
         console.error('Geocoding error:', err);
@@ -130,6 +139,13 @@ export const RouteForm: React.FC<RouteFormProps> = ({
         setIsSearching(false);
       }
     }, 450);
+  };
+
+  const handleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && searchResults.length > 0) {
+      e.preventDefault();
+      handleSelectNominatimResult(searchResults[0]);
+    }
   };
 
   const handleSelectNominatimResult = (res: NominatimResult) => {
@@ -223,6 +239,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
             id="address-search-input"
             value={addressQuery}
             onChange={(e) => handleAddressInputChange(e.target.value)}
+            onKeyDown={handleKeyDown}
             onFocus={() => {
               if (searchResults.length > 0) setShowDropdown(true);
             }}
