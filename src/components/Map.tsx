@@ -1,7 +1,30 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { ActivityType, ElevationPoint, GeneratedRoute, LatLng, RouteType } from '../types/route';
+import { calculateDistanceMeters } from '../lib/routingEngine';
 import { Layers, Maximize2, Minimize2, Navigation, ShieldCheck, ZoomIn, ZoomOut, MapPin } from 'lucide-react';
+
+// Helper to linearly interpolate between two hex colors
+function interpolateHexColor(color1: string, color2: string, factor: number): string {
+  const c1 = parseInt(color1.replace('#', ''), 16);
+  const c2 = parseInt(color2.replace('#', ''), 16);
+  const r1 = (c1 >> 16) & 255, g1 = (c1 >> 8) & 255, b1 = c1 & 255;
+  const r2 = (c2 >> 16) & 255, g2 = (c2 >> 8) & 255, b2 = c2 & 255;
+  const r = Math.round(r1 + factor * (r2 - r1));
+  const g = Math.round(g1 + factor * (g2 - g1));
+  const b = Math.round(b1 + factor * (b2 - b1));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+// 3-stop gradient from Start (Emerald #10B981) -> Mid (Amber #F59E0B) -> Finish (Coral #EF4444)
+export function getRouteGradientColor(t: number): string {
+  const clamped = Math.max(0, Math.min(1, t));
+  if (clamped < 0.5) {
+    return interpolateHexColor('#10B981', '#F59E0B', clamped * 2);
+  } else {
+    return interpolateHexColor('#F59E0B', '#EF4444', (clamped - 0.5) * 2);
+  }
+}
 
 interface MapProps {
   route: GeneratedRoute | null;
@@ -57,8 +80,7 @@ export const Map: React.FC<MapProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const polylineRef = useRef<L.Polyline | null>(null);
-  const polylineGlowRef = useRef<L.Polyline | null>(null);
+  const polylineContainerRef = useRef<L.LayerGroup | null>(null);
   const startMarkerRef = useRef<L.Marker | null>(null);
   const endMarkerRef = useRef<L.Marker | null>(null);
   const hoverMarkerRef = useRef<L.CircleMarker | null>(null);
@@ -187,8 +209,10 @@ export const Map: React.FC<MapProps> = ({
     const map = mapInstanceRef.current;
 
     // Clear previous route layers
-    if (polylineGlowRef.current) map.removeLayer(polylineGlowRef.current);
-    if (polylineRef.current) map.removeLayer(polylineRef.current);
+    if (polylineContainerRef.current) {
+      map.removeLayer(polylineContainerRef.current);
+      polylineContainerRef.current = null;
+    }
     if (startMarkerRef.current) map.removeLayer(startMarkerRef.current);
     if (endMarkerRef.current) map.removeLayer(endMarkerRef.current);
     if (privacyCircleStartRef.current) map.removeLayer(privacyCircleStartRef.current);
@@ -198,72 +222,106 @@ export const Map: React.FC<MapProps> = ({
 
     if (!route || route.coordinates.length === 0) return;
 
-    // Earthy outdoor palette
-    let strokeColor = '#2D4F3E'; // Deep Forest Green for run / standard
-    let glowColor = 'rgba(45, 79, 62, 0.25)';
+    const coords = route.coordinates;
+    const layerGroup = L.layerGroup().addTo(map);
+    polylineContainerRef.current = layerGroup;
 
-    if (route.routeType === 'gps_art') {
-      strokeColor = '#8A4A72'; // Organic Heather / Mulberry for GPS Art
-      glowColor = 'rgba(138, 74, 114, 0.28)';
-    } else if (route.activity === 'bike') {
-      strokeColor = '#C86432'; // Warm Terracotta for bike
-      glowColor = 'rgba(200, 100, 50, 0.28)';
-    } else if (route.activity === 'hike') {
-      strokeColor = '#8C6838'; // Warm Amber / Ochre for hike
-      glowColor = 'rgba(140, 104, 56, 0.28)';
+    // 1. Base Casing / Glow polyline underneath for high contrast on all map tile layers
+    L.polyline(coords, {
+      color: isDarkMode ? '#0F1512' : '#FFFFFF',
+      weight: 8,
+      opacity: 0.9,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(layerGroup);
+
+    // 2. Render Gradient Polyline Segments from Start (Emerald #10B981) -> Finish (Coral #EF4444)
+    const numPoints = coords.length;
+    for (let i = 0; i < numPoints - 1; i++) {
+      const p1 = coords[i];
+      const p2 = coords[i + 1];
+      const progressT = (i + 0.5) / (numPoints - 1);
+      const segColor = getRouteGradientColor(progressT);
+
+      L.polyline([p1, p2], {
+        color: segColor,
+        weight: 5,
+        opacity: 0.98,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(layerGroup);
     }
 
-    // Outer subtle organic glow polyline
-    polylineGlowRef.current = L.polyline(route.coordinates, {
-      color: glowColor,
-      weight: 10,
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(map);
+    // 3. Directional Chevron Arrows: Placed every 1/4 mile (402.336 meters) pointing PARALLEL along route
+    const QUARTER_MILE_METERS = 402.336;
+    const cumulativeDistances: number[] = [0];
+    let totalRouteMeters = 0;
 
-    // Main sharp polyline
-    polylineRef.current = L.polyline(route.coordinates, {
-      color: strokeColor,
-      weight: 4.5,
-      opacity: 0.95,
-      lineCap: 'round',
-      lineJoin: 'round',
-    }).addTo(map);
+    for (let i = 0; i < coords.length - 1; i++) {
+      const segDist = calculateDistanceMeters(coords[i], coords[i + 1]);
+      totalRouteMeters += segDist;
+      cumulativeDistances.push(totalRouteMeters);
+    }
 
-    // Directional chevron arrows along the route showing travel direction
-    if (route.coordinates.length >= 6) {
-      const numArrows = Math.min(12, Math.max(4, Math.floor(route.coordinates.length / 15)));
-      const step = Math.floor(route.coordinates.length / (numArrows + 1));
-
-      for (let i = step; i < route.coordinates.length - 2; i += step) {
-        const p1 = route.coordinates[i];
-        const p2 = route.coordinates[i + 1];
-        const lat1 = (p1[0] * Math.PI) / 180;
-        const lat2 = (p2[0] * Math.PI) / 180;
-        const dLng = ((p2[1] - p1[1]) * Math.PI) / 180;
-        const y = Math.sin(dLng) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-        const bearing = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-
-        const arrowIcon = L.divIcon({
-          className: 'route-directional-arrow',
-          html: `
-            <div style="transform: rotate(${bearing}deg);" class="flex items-center justify-center pointer-events-none">
-              <div style="background-color: ${strokeColor};" class="w-4 h-4 rounded-full border border-white dark:border-stone-900 shadow-md flex items-center justify-center text-white">
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="9 18 15 12 9 6"></polyline>
-                </svg>
-              </div>
-            </div>
-          `,
-          iconSize: [16, 16],
-          iconAnchor: [8, 8],
-        });
-
-        const arrowMarker = L.marker(p1, { icon: arrowIcon, interactive: false }).addTo(map);
-        directionalMarkersRef.current.push(arrowMarker);
+    const targetDistances: number[] = [];
+    if (totalRouteMeters >= QUARTER_MILE_METERS) {
+      let targetM = QUARTER_MILE_METERS;
+      while (targetM <= totalRouteMeters - 50) {
+        targetDistances.push(targetM);
+        targetM += QUARTER_MILE_METERS;
       }
+    } else if (totalRouteMeters >= 80) {
+      // Short routes: place 1 midpoint arrow
+      targetDistances.push(totalRouteMeters * 0.5);
     }
+
+    targetDistances.forEach((targetM) => {
+      // Find segment containing targetM
+      let segIndex = 0;
+      while (segIndex < cumulativeDistances.length - 1 && cumulativeDistances[segIndex + 1] < targetM) {
+        segIndex++;
+      }
+
+      const p1 = coords[segIndex];
+      const p2 = coords[Math.min(segIndex + 1, coords.length - 1)];
+      const segStartDist = cumulativeDistances[segIndex];
+      const segEndDist = cumulativeDistances[Math.min(segIndex + 1, cumulativeDistances.length - 1)];
+      const segLength = segEndDist - segStartDist;
+
+      const fraction = segLength > 0 ? Math.max(0.05, Math.min(0.95, (targetM - segStartDist) / segLength)) : 0.5;
+      const interpLat = p1[0] + fraction * (p2[0] - p1[0]);
+      const interpLng = p1[1] + fraction * (p2[1] - p1[1]);
+
+      // Calculate bearing from p1 to p2
+      const lat1 = (p1[0] * Math.PI) / 180;
+      const lat2 = (p2[0] * Math.PI) / 180;
+      const dLng = ((p2[1] - p1[1]) * Math.PI) / 180;
+      const y = Math.sin(dLng) * Math.cos(lat2);
+      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+      const bearing = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+
+      const progressRatio = totalRouteMeters > 0 ? targetM / totalRouteMeters : 0.5;
+      const arrowColor = getRouteGradientColor(progressRatio);
+
+      // SVG with upward chevron (points="6 15 12 9 18 15"), so rotation by bearing points strictly parallel along the vector
+      const arrowIcon = L.divIcon({
+        className: 'route-directional-arrow',
+        html: `
+          <div style="transform: rotate(${bearing}deg);" class="flex items-center justify-center pointer-events-none">
+            <div style="background-color: ${arrowColor};" class="w-4 h-4 rounded-full border border-white dark:border-stone-900 shadow-md flex items-center justify-center text-white">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 15 12 9 18 15"></polyline>
+              </svg>
+            </div>
+          </div>
+        `,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      });
+
+      const arrowMarker = L.marker([interpLat, interpLng], { icon: arrowIcon, interactive: false }).addTo(map);
+      directionalMarkersRef.current.push(arrowMarker);
+    });
 
     // Start Marker on the route line
     const startCoord = route.coordinates[0];
@@ -271,7 +329,7 @@ export const Map: React.FC<MapProps> = ({
       className: 'route-start-pin',
       html: `
         <div class="relative flex items-center justify-center">
-          <div class="w-6 h-6 rounded-full bg-[#2D4F3E] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[10px] font-extrabold tracking-tighter">
+          <div class="w-6 h-6 rounded-full bg-[#10B981] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[10px] font-extrabold tracking-tighter">
             GO
           </div>
         </div>
@@ -283,7 +341,7 @@ export const Map: React.FC<MapProps> = ({
       .addTo(map)
       .bindPopup(
         `<div class="p-1 font-sans">
-          <b class="text-[#2D4F3E] dark:text-[#7EB89B] text-xs">Route Start Point</b>
+          <b class="text-[#10B981] text-xs">Route Start Point</b>
           <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-1">${route.startingAddress}</p>
         </div>`
       );
@@ -299,7 +357,7 @@ export const Map: React.FC<MapProps> = ({
         className: 'route-end-pin',
         html: `
           <div class="relative flex items-center justify-center">
-            <div class="w-6 h-6 rounded-full bg-[#C86432] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[11px] font-bold">
+            <div class="w-6 h-6 rounded-full bg-[#EF4444] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[11px] font-bold">
               🏁
             </div>
           </div>
@@ -311,7 +369,7 @@ export const Map: React.FC<MapProps> = ({
         .addTo(map)
         .bindPopup(
           `<div class="p-1 font-sans">
-            <b class="text-[#C86432] text-xs">Finish Line</b>
+            <b class="text-[#EF4444] text-xs">Finish Line</b>
             <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-1">Distance: ${route.stats.distanceKm} km</p>
           </div>`
         );

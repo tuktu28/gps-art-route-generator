@@ -86,7 +86,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
   const [gpsArtText, setGpsArtText] = useState<string>('RUNNING');
   const [distanceValue, setDistanceValue] = useState<number>(5.0);
   const [routeName, setRouteName] = useState<string>('');
-  const [elevationPreference, setElevationPreference] = useState<ElevationPreference>('moderate');
+  const [elevationPreference] = useState<ElevationPreference>('flat');
   const [privacyMaskingEnabled, setPrivacyMaskingEnabled] = useState<boolean>(true);
 
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -499,33 +499,17 @@ export const RouteForm: React.FC<RouteFormProps> = ({
         </div>
       </div>
 
-      {/* 6. Optional Route Name & Elevation Tendency */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">Route Name (Optional)</label>
-          <input
-            type="text"
-            id="route-name-input"
-            value={routeName}
-            onChange={(e) => setRouteName(e.target.value)}
-            placeholder="e.g. Morning Trail Loop"
-            className="w-full px-2.5 py-2 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:border-[#2D4F3E]"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">Terrain Profile</label>
-          <select
-            id="terrain-profile-select"
-            value={elevationPreference}
-            onChange={(e) => setElevationPreference(e.target.value as ElevationPreference)}
-            className="w-full px-2.5 py-2 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-stone-800 dark:text-stone-200 focus:outline-none focus:border-[#2D4F3E]"
-          >
-            <option value="flat">Flat (~5-15m)</option>
-            <option value="moderate">Moderate Rolling</option>
-            <option value="hilly">Hilly Climbs</option>
-          </select>
-        </div>
+      {/* 6. Optional Route Name */}
+      <div className="flex flex-col gap-1">
+        <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">Route Name (Optional)</label>
+        <input
+          type="text"
+          id="route-name-input"
+          value={routeName}
+          onChange={(e) => setRouteName(e.target.value)}
+          placeholder="e.g. Morning Riverway Run"
+          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:border-[#2D4F3E]"
+        />
       </div>
 
       {/* 7. Privacy & PostGIS Masking Toggle */}
