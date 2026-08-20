@@ -258,17 +258,6 @@ export default function App() {
             {unit.toUpperCase()}
           </button>
 
-          {/* Master Deployment Guide CTA */}
-          <button
-            id="open-master-guide-btn"
-            onClick={() => setIsGuideModalOpen(true)}
-            className="px-3 py-1.5 rounded-xl bg-[#8C6838] hover:bg-[#73532B] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Master Blueprint</span>
-            <span className="md:hidden">Guide</span>
-          </button>
-
           {/* Saved Routes Library */}
           <button
             id="open-saved-routes-btn"
