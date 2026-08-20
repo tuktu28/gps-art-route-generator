@@ -12,12 +12,13 @@ import {
   Bike,
   Compass,
   Footprints,
-  Heart,
   Info,
   Loader2,
   Locate,
   MapPin,
   Mountain,
+  Plus,
+  Minus,
   RefreshCw,
   Search,
   Shield,
@@ -91,6 +92,14 @@ export const RouteForm: React.FC<RouteFormProps> = ({
 
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Sync address if selectedLocation is changed externally (e.g. via map click)
+  useEffect(() => {
+    // When location updates without an explicit addressQuery match
+    if (addressQuery.startsWith('Pin (') || addressQuery.startsWith('GPS (')) {
+      setAddressQuery(`Pin (${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)})`);
+    }
+  }, [selectedLocation]);
+
   // Debounced Nominatim Address Geocoding
   const handleAddressInputChange = (val: string) => {
     setAddressQuery(val);
@@ -155,6 +164,13 @@ export const RouteForm: React.FC<RouteFormProps> = ({
     );
   };
 
+  const adjustDistance = (delta: number) => {
+    setDistanceValue((prev) => {
+      const next = Math.max(0.5, Math.min(100, parseFloat((prev + delta).toFixed(1))));
+      return next;
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const distanceInKm = unit === 'km' ? distanceValue : distanceValue * 1.60934;
@@ -173,26 +189,31 @@ export const RouteForm: React.FC<RouteFormProps> = ({
     });
   };
 
+  // Preset Distance Chips
+  const distancePresets = unit === 'mi'
+    ? [3.1, 5.0, 6.2, 10.0, 13.1]
+    : [5.0, 8.0, 10.0, 15.0, 21.1];
+
   return (
     <form
       id="route-generator-form"
       onSubmit={handleSubmit}
-      className="flex flex-col gap-4.5 text-slate-100"
+      className="flex flex-col gap-4 text-[#1E2A24] dark:text-[#E8EAE6]"
     >
       {/* 1. Address Search / Starting Location */}
       <div className="relative flex flex-col gap-1.5">
-        <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+        <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 flex items-center justify-between">
           <span className="flex items-center gap-1.5">
-            <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+            <MapPin className="w-3.5 h-3.5 text-[#C86432]" />
             Starting Location
           </span>
           <button
             type="button"
             onClick={handleGeolocate}
             id="geolocate-me-btn"
-            className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 transition-colors"
+            className="text-[11px] text-[#2D4F3E] dark:text-[#7EB89B] hover:underline flex items-center gap-1 transition-colors cursor-pointer font-medium"
           >
-            <Locate className="w-3 h-3" /> Use My GPS
+            <Locate className="w-3 h-3 text-[#C86432]" /> Use My GPS
           </button>
         </label>
 
@@ -205,24 +226,24 @@ export const RouteForm: React.FC<RouteFormProps> = ({
             onFocus={() => {
               if (searchResults.length > 0) setShowDropdown(true);
             }}
-            placeholder="Search address, park, or landmark..."
-            className="w-full pl-9 pr-8 py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all shadow-inner"
+            placeholder="Search address, park, or click on map..."
+            className="w-full pl-9 pr-8 py-2.5 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-[#1E2A24] dark:text-[#E8EAE6] placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76] focus:ring-1 focus:ring-[#2D4F3E] dark:focus:ring-[#5C8E76] transition-all shadow-sm"
           />
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+          <Search className="w-4 h-4 text-stone-400 dark:text-stone-500 absolute left-3 top-3 pointer-events-none" />
           {isSearching && (
-            <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin absolute right-3 top-3" />
+            <Loader2 className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B] animate-spin absolute right-3 top-3" />
           )}
         </div>
 
-        {/* Quick presets row */}
+        {/* Quick hotspots row */}
         <div className="flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none">
-          <span className="text-[10px] text-slate-500 font-medium whitespace-nowrap">Hotspots:</span>
+          <span className="text-[10px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap">Hotspots:</span>
           {PRESET_CITIES.map((city) => (
             <button
               key={city.name}
               type="button"
               onClick={() => handleSelectPreset(city)}
-              className="px-2 py-0.5 rounded-md bg-slate-800/80 hover:bg-slate-700 text-[10px] text-slate-300 whitespace-nowrap border border-slate-700 transition-colors"
+              className="px-2 py-0.5 rounded-md bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#EAE4D7] dark:hover:bg-[#324038] text-[10px] text-stone-700 dark:text-stone-300 whitespace-nowrap border border-[#E5DFD3] dark:border-[#2E3C34] transition-colors cursor-pointer"
             >
               {city.name.split(',')[0]}
             </button>
@@ -231,15 +252,15 @@ export const RouteForm: React.FC<RouteFormProps> = ({
 
         {/* Nominatim Search Dropdown */}
         {showDropdown && searchResults.length > 0 && (
-          <div className="absolute top-16 left-0 right-0 z-50 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl p-1 backdrop-blur-lg flex flex-col gap-0.5 max-h-56 overflow-y-auto">
+          <div className="absolute top-16 left-0 right-0 z-50 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-xl p-1 backdrop-blur-lg flex flex-col gap-0.5 max-h-56 overflow-y-auto">
             {searchResults.map((res) => (
               <button
                 key={res.place_id}
                 type="button"
                 onClick={() => handleSelectNominatimResult(res)}
-                className="w-full text-left px-3 py-2 rounded-lg text-xs text-slate-200 hover:bg-slate-800 hover:text-emerald-400 transition-colors flex items-start gap-2"
+                className="w-full text-left px-3 py-2 rounded-lg text-xs text-stone-700 dark:text-stone-200 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A] hover:text-[#2D4F3E] dark:hover:text-[#7EB89B] transition-colors flex items-start gap-2 cursor-pointer"
               >
-                <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+                <MapPin className="w-3.5 h-3.5 text-stone-400 shrink-0 mt-0.5" />
                 <span className="truncate">{res.display_name}</span>
               </button>
             ))}
@@ -249,13 +270,13 @@ export const RouteForm: React.FC<RouteFormProps> = ({
 
       {/* 2. Activity Selector */}
       <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-semibold text-slate-300">Activity Type</label>
+        <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Activity Type</label>
         <div className="grid grid-cols-3 gap-2">
           {(
             [
-              { id: 'run', label: 'Run', icon: Footprints, color: 'text-emerald-400' },
-              { id: 'bike', label: 'Bike', icon: Bike, color: 'text-cyan-400' },
-              { id: 'hike', label: 'Hike', icon: Mountain, color: 'text-amber-400' },
+              { id: 'run', label: 'Run', icon: Footprints, color: 'text-[#2D4F3E] dark:text-[#7EB89B]' },
+              { id: 'bike', label: 'Bike', icon: Bike, color: 'text-[#C86432]' },
+              { id: 'hike', label: 'Hike', icon: Mountain, color: 'text-[#8C6838]' },
             ] as const
           ).map((item) => {
             const Icon = item.icon;
@@ -266,14 +287,14 @@ export const RouteForm: React.FC<RouteFormProps> = ({
                 type="button"
                 id={`activity-btn-${item.id}`}
                 onClick={() => setActivity(item.id)}
-                className={`py-2.5 px-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+                className={`py-2.5 px-3 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
                   isSelected
-                    ? 'bg-slate-800 border-emerald-500/80 shadow-md ring-1 ring-emerald-500/40 text-white'
-                    : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                    ? 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 border-[#2D4F3E] dark:border-[#5C8E76] shadow-sm text-[#2D4F3E] dark:text-[#E8EAE6] font-semibold'
+                    : 'bg-white dark:bg-[#19201D] border-[#E5DFD3] dark:border-[#2E3C34] text-stone-600 dark:text-stone-400 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
                 }`}
               >
-                <Icon className={`w-4 h-4 ${isSelected ? item.color : 'text-slate-400'}`} />
-                <span className="text-xs font-medium">{item.label}</span>
+                <Icon className={`w-4 h-4 ${isSelected ? item.color : 'text-stone-400'}`} />
+                <span className="text-xs">{item.label}</span>
               </button>
             );
           })}
@@ -282,7 +303,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
 
       {/* 3. Route Type Selector */}
       <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-semibold text-slate-300">Route Geometry</label>
+        <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Route Geometry</label>
         <div className="grid grid-cols-3 gap-2">
           {(
             [
@@ -299,24 +320,24 @@ export const RouteForm: React.FC<RouteFormProps> = ({
                 type="button"
                 id={`route-type-btn-${item.id}`}
                 onClick={() => setRouteType(item.id)}
-                className={`py-2.5 px-2 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+                className={`py-2.5 px-2 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
                   isSelected
                     ? item.id === 'gps_art'
-                      ? 'bg-purple-950/40 border-purple-500 text-purple-200 shadow-md ring-1 ring-purple-500/50'
-                      : 'bg-slate-800 border-emerald-500/80 shadow-md ring-1 ring-emerald-500/40 text-white'
-                    : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                      ? 'bg-[#8A4A72]/10 dark:bg-[#8A4A72]/25 border-[#8A4A72] text-[#8A4A72] dark:text-[#E1B8D4] font-semibold'
+                      : 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 border-[#2D4F3E] dark:border-[#5C8E76] shadow-sm text-[#2D4F3E] dark:text-[#E8EAE6] font-semibold'
+                    : 'bg-white dark:bg-[#19201D] border-[#E5DFD3] dark:border-[#2E3C34] text-stone-600 dark:text-stone-400 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
                 }`}
               >
                 <Icon
                   className={`w-4 h-4 ${
                     isSelected
                       ? item.id === 'gps_art'
-                        ? 'text-purple-400 animate-pulse'
-                        : 'text-emerald-400'
-                      : 'text-slate-400'
+                        ? 'text-[#8A4A72] dark:text-[#E1B8D4]'
+                        : 'text-[#2D4F3E] dark:text-[#7EB89B]'
+                      : 'text-stone-400'
                   }`}
                 />
-                <span className="text-xs font-medium whitespace-nowrap">{item.label}</span>
+                <span className="text-xs whitespace-nowrap">{item.label}</span>
               </button>
             );
           })}
@@ -325,10 +346,10 @@ export const RouteForm: React.FC<RouteFormProps> = ({
 
       {/* 4. CONDITIONAL LOGIC: GPS Art Text Input & Warning */}
       {routeType === 'gps_art' ? (
-        <div className="p-3.5 rounded-2xl bg-purple-950/30 border border-purple-800/50 flex flex-col gap-3">
+        <div className="p-3.5 rounded-2xl bg-[#8A4A72]/10 dark:bg-[#8A4A72]/20 border border-[#8A4A72]/30 flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-purple-200 flex items-center gap-1.5">
-              <Type className="w-3.5 h-3.5 text-purple-400" />
+            <label className="text-xs font-semibold text-[#8A4A72] dark:text-[#E1B8D4] flex items-center gap-1.5">
+              <Type className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4]" />
               GPS Art Word / Shape
             </label>
             <input
@@ -338,22 +359,22 @@ export const RouteForm: React.FC<RouteFormProps> = ({
               onChange={(e) => setGpsArtText(e.target.value.toUpperCase())}
               placeholder="e.g. RUNNING, 5K, HEART"
               maxLength={12}
-              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-purple-700/60 text-sm font-mono font-bold tracking-wider text-purple-200 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-400 uppercase"
+              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#19201D] border border-[#8A4A72]/40 text-sm font-mono font-bold tracking-wider text-[#8A4A72] dark:text-[#E1B8D4] focus:outline-none focus:border-[#8A4A72] uppercase"
             />
           </div>
 
           {/* Quick preset glyph words */}
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] text-purple-400/80 font-medium">Quick Art:</span>
+            <span className="text-[10px] text-[#8A4A72] dark:text-[#E1B8D4] font-medium">Quick Art:</span>
             {GPS_ART_PRESETS.map((preset) => (
               <button
                 key={preset}
                 type="button"
                 onClick={() => setGpsArtText(preset)}
-                className={`px-2 py-0.5 rounded-md text-[10px] font-mono border transition-all ${
+                className={`px-2 py-0.5 rounded-md text-[10px] font-mono border transition-all cursor-pointer ${
                   gpsArtText === preset
-                    ? 'bg-purple-600 text-white border-purple-400 font-bold'
-                    : 'bg-purple-900/40 text-purple-300 border-purple-800 hover:bg-purple-800/50'
+                    ? 'bg-[#8A4A72] text-white border-[#8A4A72] font-bold'
+                    : 'bg-white/80 dark:bg-[#19201D] text-[#8A4A72] dark:text-[#E1B8D4] border-[#8A4A72]/30 hover:bg-[#8A4A72]/20'
                 }`}
               >
                 {preset}
@@ -361,29 +382,29 @@ export const RouteForm: React.FC<RouteFormProps> = ({
             ))}
           </div>
 
-          {/* Explicit Warning Notice Required by Master Spec */}
-          <div className="p-2.5 rounded-xl bg-purple-900/30 border border-purple-700/40 text-[11px] text-purple-300/90 flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          {/* Explicit Notice */}
+          <div className="p-2.5 rounded-xl bg-[#8A4A72]/15 dark:bg-[#8A4A72]/30 border border-[#8A4A72]/30 text-[11px] text-stone-700 dark:text-stone-300 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-[#C86432] shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong className="text-amber-300">Notice:</strong> GPS Art uses best-effort spatial fitting and depends on local street grids. Try shifting your start point if results vary.
+              <strong className="text-[#C86432]">Notice:</strong> GPS Art fits strokes to real street grids and keeps distance within ±5% tolerance.
             </p>
           </div>
         </div>
       ) : null}
 
-      {/* 5. Target Distance & Units Toggle */}
-      <div className="flex flex-col gap-2 p-3 rounded-2xl bg-slate-900/60 border border-slate-800">
+      {/* 5. Target Distance: INPUT BOX (No scroll bar / slider) + Stepper & Presets */}
+      <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
         <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-slate-300">
+          <label htmlFor="target-distance-input" className="text-xs font-semibold text-stone-700 dark:text-stone-300">
             Target Distance
           </label>
-          <div className="flex items-center rounded-lg bg-slate-950 p-0.5 border border-slate-800">
+          <div className="flex items-center rounded-lg bg-[#F4EFE6] dark:bg-[#121614] p-0.5 border border-[#E5DFD3] dark:border-[#2E3C34]">
             <button
               type="button"
               id="unit-km-btn"
               onClick={() => onUnitChange('km')}
-              className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors ${
-                unit === 'km' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
+              className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
+                unit === 'km' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
               }`}
             >
               KM
@@ -392,8 +413,8 @@ export const RouteForm: React.FC<RouteFormProps> = ({
               type="button"
               id="unit-mi-btn"
               onClick={() => onUnitChange('mi')}
-              className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors ${
-                unit === 'mi' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
+              className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
+                unit === 'mi' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
               }`}
             >
               MILES
@@ -401,43 +422,88 @@ export const RouteForm: React.FC<RouteFormProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <input
-            type="range"
-            min={1}
-            max={unit === 'km' ? 50 : 31}
-            step={0.5}
-            value={distanceValue}
-            onChange={(e) => setDistanceValue(parseFloat(e.target.value))}
-            className="w-full accent-emerald-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg appearance-none"
-          />
-          <div className="w-16 shrink-0 flex items-center justify-end font-mono text-sm font-bold text-emerald-400">
-            {distanceValue.toFixed(1)} {unit}
+        {/* Dedicated Numeric Input Box with Steppers */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => adjustDistance(-0.5)}
+            aria-label="Decrease distance"
+            className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
+          >
+            <Minus className="w-4 h-4" />
+          </button>
+
+          <div className="relative flex-1">
+            <input
+              type="number"
+              id="target-distance-input"
+              min="0.5"
+              max="150"
+              step="0.1"
+              value={distanceValue}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                if (!isNaN(val)) setDistanceValue(val);
+                else setDistanceValue(0);
+              }}
+              className="w-full text-center py-2 px-3 text-lg font-mono font-bold text-[#2D4F3E] dark:text-[#7EB89B] bg-[#F8F5EE] dark:bg-[#121614] border border-[#E5DFD3] dark:border-[#2E3C34] rounded-xl focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76]"
+            />
+            <span className="absolute right-3 top-2.5 text-xs font-mono font-semibold text-stone-400">
+              {unit}
+            </span>
           </div>
+
+          <button
+            type="button"
+            onClick={() => adjustDistance(0.5)}
+            aria-label="Increase distance"
+            className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Quick Distance Preset Chips */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+          <span className="text-[10px] text-stone-500 font-medium">Presets:</span>
+          {distancePresets.map((val) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => setDistanceValue(val)}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors border cursor-pointer ${
+                distanceValue === val
+                  ? 'bg-[#2D4F3E] text-white border-[#2D4F3E] font-semibold'
+                  : 'bg-[#F4EFE6] dark:bg-[#25302A] text-stone-700 dark:text-stone-300 border-[#E5DFD3] dark:border-[#2E3C34] hover:bg-[#EAE4D7] dark:hover:bg-[#324038]'
+              }`}
+            >
+              {val} {unit}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* 6. Optional Route Name & Elevation Tendency */}
       <div className="grid grid-cols-2 gap-2">
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-medium text-slate-400">Route Name (Optional)</label>
+          <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">Route Name (Optional)</label>
           <input
             type="text"
             id="route-name-input"
             value={routeName}
             onChange={(e) => setRouteName(e.target.value)}
-            placeholder="e.g. Morning Pace Run"
-            className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500"
+            placeholder="e.g. Morning Trail Loop"
+            className="w-full px-2.5 py-2 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:border-[#2D4F3E]"
           />
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-medium text-slate-400">Terrain Profile</label>
+          <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">Terrain Profile</label>
           <select
             id="terrain-profile-select"
             value={elevationPreference}
             onChange={(e) => setElevationPreference(e.target.value as ElevationPreference)}
-            className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
+            className="w-full px-2.5 py-2 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-stone-800 dark:text-stone-200 focus:outline-none focus:border-[#2D4F3E]"
           >
             <option value="flat">Flat (~5-15m)</option>
             <option value="moderate">Moderate Rolling</option>
@@ -447,12 +513,12 @@ export const RouteForm: React.FC<RouteFormProps> = ({
       </div>
 
       {/* 7. Privacy & PostGIS Masking Toggle */}
-      <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80">
+      <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
         <div className="flex items-center gap-2">
-          <Shield className={`w-4 h-4 ${privacyMaskingEnabled ? 'text-blue-400' : 'text-slate-500'}`} />
+          <Shield className={`w-4 h-4 ${privacyMaskingEnabled ? 'text-[#2D4F3E] dark:text-[#7EB89B]' : 'text-stone-400'}`} />
           <div className="flex flex-col">
-            <span className="text-xs font-semibold text-slate-200">PostGIS Privacy Masking</span>
-            <span className="text-[10px] text-slate-400">
+            <span className="text-xs font-semibold text-stone-800 dark:text-stone-200">500m Privacy Masking</span>
+            <span className="text-[10px] text-stone-500 dark:text-stone-400">
               {distanceValue > (unit === 'km' ? 5 : 3.1)
                 ? '500m start/end truncation (>5km)'
                 : '500m spatial jitter (≤5km)'}
@@ -468,7 +534,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
             onChange={(e) => setPrivacyMaskingEnabled(e.target.checked)}
             className="sr-only peer"
           />
-          <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+          <div className="w-9 h-5 bg-stone-300 dark:bg-stone-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#2D4F3E] dark:peer-checked:bg-[#436E58]"></div>
         </label>
       </div>
 
@@ -477,16 +543,16 @@ export const RouteForm: React.FC<RouteFormProps> = ({
         type="submit"
         id="generate-route-submit-btn"
         disabled={isLoading}
-        className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-bold text-sm tracking-wide shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full py-3.5 px-4 rounded-xl bg-[#2D4F3E] hover:bg-[#233F31] active:bg-[#1C3328] text-white font-bold text-sm tracking-wide shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isLoading ? (
           <>
-            <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
-            <span>Calculating Spatial Graph...</span>
+            <Loader2 className="w-4 h-4 animate-spin text-white" />
+            <span>Calculating Real Road Snapping...</span>
           </>
         ) : (
           <>
-            <Zap className="w-4 h-4 fill-slate-950" />
+            <Zap className="w-4 h-4 fill-white" />
             <span>
               {routeType === 'gps_art' ? `Generate "${gpsArtText || 'RUN'}" GPS Art` : 'Generate Optimal Route'}
             </span>

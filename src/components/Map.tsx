@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { ActivityType, ElevationPoint, GeneratedRoute, LatLng, RouteType } from '../types/route';
-import { Layers, Maximize2, Minimize2, Navigation, ShieldCheck, ZoomIn, ZoomOut } from 'lucide-react';
+import { Layers, Maximize2, Minimize2, Navigation, ShieldCheck, ZoomIn, ZoomOut, MapPin } from 'lucide-react';
 
 interface MapProps {
   route: GeneratedRoute | null;
@@ -9,30 +9,40 @@ interface MapProps {
   onMapClick?: (latLng: LatLng) => void;
   selectedLocation: LatLng;
   showPrivacyBuffer?: boolean;
+  isDarkMode?: boolean;
 }
 
-type TileLayerKey = 'dark' | 'streets' | 'satellite' | 'topo';
+type TileLayerKey = 'outdoors' | 'light' | 'dark' | 'satellite' | 'topo';
 
-const TILE_LAYERS: Record<TileLayerKey, { name: string; url: string; attribution: string }> = {
+// Robust, fast, and 403-free tile layers with earthy natural cartography
+const TILE_LAYERS: Record<TileLayerKey, { name: string; url: string; attribution: string; subdomains?: string[] }> = {
+  outdoors: {
+    name: 'Natural Outdoors',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
+    subdomains: ['a', 'b', 'c', 'd'],
+  },
+  light: {
+    name: 'Clean Light',
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
+    subdomains: ['a', 'b', 'c', 'd'],
+  },
   dark: {
-    name: 'Tactical Dark',
+    name: 'Tactical Slate',
     url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
-  },
-  streets: {
-    name: 'OSM Standard',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+    subdomains: ['a', 'b', 'c', 'd'],
   },
   satellite: {
-    name: 'Satellite',
+    name: 'Satellite View',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: '&copy; Esri, Maxar, Earthstar Geographics',
   },
   topo: {
-    name: 'Topographic',
-    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://opentopomap.org">OpenTopoMap</a>',
+    name: 'Topographic Contours',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, DeLorme, NAVTEQ',
   },
 };
 
@@ -42,6 +52,7 @@ export const Map: React.FC<MapProps> = ({
   onMapClick,
   selectedLocation,
   showPrivacyBuffer = true,
+  isDarkMode = false,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -55,9 +66,16 @@ export const Map: React.FC<MapProps> = ({
   const privacyCircleEndRef = useRef<L.Circle | null>(null);
   const clickMarkerRef = useRef<L.Marker | null>(null);
 
-  const [activeTile, setActiveTile] = useState<TileLayerKey>('dark');
+  const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'outdoors');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showLayerMenu, setShowLayerMenu] = useState<boolean>(false);
+
+  // Sync default layer with theme changes if user hasn't manually swapped to satellite/topo
+  useEffect(() => {
+    if (activeTile === 'dark' || activeTile === 'outdoors' || activeTile === 'light') {
+      setActiveTile(isDarkMode ? 'dark' : 'outdoors');
+    }
+  }, [isDarkMode]);
 
   // Initialize Map
   useEffect(() => {
@@ -70,8 +88,10 @@ export const Map: React.FC<MapProps> = ({
       attributionControl: true,
     });
 
-    const initialLayer = L.tileLayer(TILE_LAYERS.dark.url, {
-      attribution: TILE_LAYERS.dark.attribution,
+    const initialLayerConfig = TILE_LAYERS[activeTile];
+    const initialLayer = L.tileLayer(initialLayerConfig.url, {
+      attribution: initialLayerConfig.attribution,
+      subdomains: initialLayerConfig.subdomains || ['a', 'b', 'c', 'd'],
       maxZoom: 19,
     }).addTo(map);
 
@@ -97,8 +117,10 @@ export const Map: React.FC<MapProps> = ({
     if (tileLayerRef.current) {
       mapInstanceRef.current.removeLayer(tileLayerRef.current);
     }
-    const newLayer = L.tileLayer(TILE_LAYERS[activeTile].url, {
-      attribution: TILE_LAYERS[activeTile].attribution,
+    const layerConfig = TILE_LAYERS[activeTile];
+    const newLayer = L.tileLayer(layerConfig.url, {
+      attribution: layerConfig.attribution,
+      subdomains: layerConfig.subdomains || ['a', 'b', 'c', 'd'],
       maxZoom: 19,
     }).addTo(mapInstanceRef.current);
     tileLayerRef.current = newLayer;
@@ -116,24 +138,41 @@ export const Map: React.FC<MapProps> = ({
 
     if (!route) {
       const pinHtml = `
-        <div class="relative flex items-center justify-center">
-          <div class="absolute w-8 h-8 rounded-full bg-emerald-500/30 animate-ping"></div>
-          <div class="w-6 h-6 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center shadow-lg text-white font-bold text-xs">
-            📍
+        <div class="relative flex items-center justify-center cursor-pointer group">
+          <div class="absolute w-9 h-9 rounded-full bg-[#3D6B56]/30 dark:bg-[#5C8E76]/30 animate-ping"></div>
+          <div class="w-7 h-7 rounded-full bg-[#2D4F3E] dark:bg-[#436E58] border-2 border-white dark:border-[#121614] flex items-center justify-center shadow-xl text-white font-bold text-xs transform transition-transform group-hover:scale-110">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
           </div>
         </div>
       `;
       const icon = L.divIcon({
         className: 'custom-start-icon',
         html: pinHtml,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
+        iconSize: [36, 36],
+        iconAnchor: [18, 18],
       });
 
-      clickMarkerRef.current = L.marker([selectedLocation.lat, selectedLocation.lng], { icon })
-        .addTo(map)
-        .bindPopup(`<b class="text-xs text-slate-200">Start Location</b><br/><span class="text-[11px] text-slate-400">Lat: ${selectedLocation.lat.toFixed(4)}, Lng: ${selectedLocation.lng.toFixed(4)}</span>`);
+      const marker = L.marker([selectedLocation.lat, selectedLocation.lng], {
+        icon,
+        draggable: true,
+      }).addTo(map);
 
+      marker.bindPopup(
+        `<div class="p-1 font-sans">
+          <b class="text-xs font-semibold text-[#2D4F3E] dark:text-[#7EB89B]">Selected Start Point</b>
+          <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-0.5">Drag pin or click map to move</p>
+          <span class="text-[10px] font-mono text-stone-500">${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)}</span>
+        </div>`
+      );
+
+      marker.on('dragend', (e) => {
+        const newPos = (e.target as L.Marker).getLatLng();
+        if (onMapClick) {
+          onMapClick({ lat: newPos.lat, lng: newPos.lng });
+        }
+      });
+
+      clickMarkerRef.current = marker;
       map.setView([selectedLocation.lat, selectedLocation.lng], map.getZoom());
     }
   }, [selectedLocation, route]);
@@ -153,25 +192,25 @@ export const Map: React.FC<MapProps> = ({
 
     if (!route || route.coordinates.length === 0) return;
 
-    // Color theme based on route type & activity
-    let strokeColor = '#10b981'; // Emerald for run
-    let glowColor = 'rgba(16, 185, 129, 0.35)';
+    // Earthy outdoor palette
+    let strokeColor = '#2D4F3E'; // Deep Forest Green for run / standard
+    let glowColor = 'rgba(45, 79, 62, 0.25)';
 
     if (route.routeType === 'gps_art') {
-      strokeColor = '#a855f7'; // Purple for GPS Art
-      glowColor = 'rgba(168, 85, 247, 0.4)';
+      strokeColor = '#8A4A72'; // Organic Heather / Mulberry for GPS Art
+      glowColor = 'rgba(138, 74, 114, 0.28)';
     } else if (route.activity === 'bike') {
-      strokeColor = '#06b6d4'; // Cyan for bike
-      glowColor = 'rgba(6, 182, 212, 0.4)';
+      strokeColor = '#C86432'; // Warm Terracotta for bike
+      glowColor = 'rgba(200, 100, 50, 0.28)';
     } else if (route.activity === 'hike') {
-      strokeColor = '#f59e0b'; // Amber for hike
-      glowColor = 'rgba(245, 158, 11, 0.4)';
+      strokeColor = '#8C6838'; // Warm Amber / Ochre for hike
+      glowColor = 'rgba(140, 104, 56, 0.28)';
     }
 
-    // Outer glow polyline
+    // Outer subtle organic glow polyline
     polylineGlowRef.current = L.polyline(route.coordinates, {
       color: glowColor,
-      weight: 9,
+      weight: 10,
       lineCap: 'round',
       lineJoin: 'round',
     }).addTo(map);
@@ -185,14 +224,14 @@ export const Map: React.FC<MapProps> = ({
       lineJoin: 'round',
     }).addTo(map);
 
-    // Start Marker
+    // Start Marker (Earthy Green & Ochre badge)
     const startCoord = route.coordinates[0];
     const startIcon = L.divIcon({
       className: 'route-start-pin',
       html: `
         <div class="relative flex items-center justify-center">
-          <div class="absolute w-7 h-7 rounded-full bg-emerald-400/40 animate-ping"></div>
-          <div class="w-6 h-6 rounded-full bg-emerald-500 border-2 border-slate-900 flex items-center justify-center text-white shadow-xl text-[10px] font-extrabold tracking-tighter">
+          <div class="absolute w-8 h-8 rounded-full bg-[#2D4F3E]/30 dark:bg-[#5C8E76]/40 animate-ping"></div>
+          <div class="w-6 h-6 rounded-full bg-[#2D4F3E] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[10px] font-extrabold tracking-tighter">
             GO
           </div>
         </div>
@@ -202,7 +241,12 @@ export const Map: React.FC<MapProps> = ({
     });
     startMarkerRef.current = L.marker(startCoord, { icon: startIcon })
       .addTo(map)
-      .bindPopup(`<div class="p-1"><b class="text-emerald-400 text-xs">Route Start Point</b><p class="text-[11px] text-slate-300 mt-1">${route.startingAddress}</p></div>`);
+      .bindPopup(
+        `<div class="p-1 font-sans">
+          <b class="text-[#2D4F3E] dark:text-[#7EB89B] text-xs">Route Start Point</b>
+          <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-1">${route.startingAddress}</p>
+        </div>`
+      );
 
     // End Marker
     const endCoord = route.coordinates[route.coordinates.length - 1];
@@ -215,7 +259,7 @@ export const Map: React.FC<MapProps> = ({
         className: 'route-end-pin',
         html: `
           <div class="relative flex items-center justify-center">
-            <div class="w-6 h-6 rounded-full bg-rose-500 border-2 border-slate-900 flex items-center justify-center text-white shadow-xl text-[11px] font-bold">
+            <div class="w-6 h-6 rounded-full bg-[#C86432] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[11px] font-bold">
               🏁
             </div>
           </div>
@@ -225,29 +269,44 @@ export const Map: React.FC<MapProps> = ({
       });
       endMarkerRef.current = L.marker(endCoord, { icon: endIcon })
         .addTo(map)
-        .bindPopup(`<div class="p-1"><b class="text-rose-400 text-xs">Finish Line</b><p class="text-[11px] text-slate-300 mt-1">Distance: ${route.stats.distanceKm} km</p></div>`);
+        .bindPopup(
+          `<div class="p-1 font-sans">
+            <b class="text-[#C86432] text-xs">Finish Line</b>
+            <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-1">Distance: ${route.stats.distanceKm} km</p>
+          </div>`
+        );
     }
 
     // Privacy Buffer Visualizer (500m circle around sensitive origins)
     if (showPrivacyBuffer && route.privacy.applied) {
-      privacyCircleStartRef.current = L.circle([route.privacy.originalStart.lat, route.privacy.originalStart.lng], {
-        radius: 500,
-        color: '#3b82f6',
-        dashArray: '4, 8',
-        fillColor: '#3b82f6',
-        fillOpacity: 0.12,
-        weight: 1.5,
-      }).addTo(map).bindPopup(`<div class="text-xs text-blue-300 font-semibold">500m PostGIS Privacy Zone (Start)</div>`);
-
-      if (route.privacy.originalEnd) {
-        privacyCircleEndRef.current = L.circle([route.privacy.originalEnd.lat, route.privacy.originalEnd.lng], {
+      privacyCircleStartRef.current = L.circle(
+        [route.privacy.originalStart.lat, route.privacy.originalStart.lng],
+        {
           radius: 500,
-          color: '#3b82f6',
+          color: '#5E8271',
           dashArray: '4, 8',
-          fillColor: '#3b82f6',
+          fillColor: '#5E8271',
           fillOpacity: 0.12,
           weight: 1.5,
-        }).addTo(map).bindPopup(`<div class="text-xs text-blue-300 font-semibold">500m PostGIS Privacy Zone (Finish)</div>`);
+        }
+      )
+        .addTo(map)
+        .bindPopup(`<div class="text-xs text-stone-700 dark:text-stone-300 font-medium">500m Privacy Protected Zone (Start)</div>`);
+
+      if (route.privacy.originalEnd) {
+        privacyCircleEndRef.current = L.circle(
+          [route.privacy.originalEnd.lat, route.privacy.originalEnd.lng],
+          {
+            radius: 500,
+            color: '#5E8271',
+            dashArray: '4, 8',
+            fillColor: '#5E8271',
+            fillOpacity: 0.12,
+            weight: 1.5,
+          }
+        )
+          .addTo(map)
+          .bindPopup(`<div class="text-xs text-stone-700 dark:text-stone-300 font-medium">500m Privacy Protected Zone (Finish)</div>`);
       }
     }
 
@@ -267,13 +326,16 @@ export const Map: React.FC<MapProps> = ({
     }
 
     if (hoveredElevationPoint && route) {
-      hoverMarkerRef.current = L.circleMarker([hoveredElevationPoint.lat, hoveredElevationPoint.lng], {
-        radius: 7,
-        fillColor: '#38bdf8',
-        fillOpacity: 1,
-        color: '#ffffff',
-        weight: 2.5,
-      }).addTo(map);
+      hoverMarkerRef.current = L.circleMarker(
+        [hoveredElevationPoint.lat, hoveredElevationPoint.lng],
+        {
+          radius: 7,
+          fillColor: '#C86432',
+          fillOpacity: 1,
+          color: '#ffffff',
+          weight: 2.5,
+        }
+      ).addTo(map);
     }
   }, [hoveredElevationPoint, route]);
 
@@ -303,10 +365,10 @@ export const Map: React.FC<MapProps> = ({
   return (
     <div
       id="interactive-map-container"
-      className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl"
+      className="relative w-full h-full min-h-[440px] rounded-2xl overflow-hidden border border-[#E5DFD3] dark:border-[#28342E] bg-[#F4EFE6] dark:bg-[#121614] shadow-md transition-colors"
     >
       {/* The Leaflet Container */}
-      <div ref={mapContainerRef} className="w-full h-full min-h-[420px] z-0" />
+      <div ref={mapContainerRef} className="w-full h-full min-h-[440px] z-0 cursor-crosshair" />
 
       {/* Floating Tactical Overlay Controls */}
       <div className="absolute top-4 right-4 z-[400] flex flex-col gap-2">
@@ -316,13 +378,13 @@ export const Map: React.FC<MapProps> = ({
             id="map-layer-toggle-btn"
             onClick={() => setShowLayerMenu(!showLayerMenu)}
             aria-label="Toggle map layer menu"
-            className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-700 text-slate-200 hover:text-white hover:bg-slate-800 backdrop-blur-md shadow-lg transition-all"
+            className="p-2.5 rounded-xl bg-white/95 dark:bg-[#19201D]/95 border border-[#E5DFD3] dark:border-[#2E3C34] text-[#2D4F3E] dark:text-[#E8EAE6] hover:bg-[#F4EFE6] dark:hover:bg-[#25302A] backdrop-blur-md shadow-md transition-all cursor-pointer"
           >
             <Layers className="w-4 h-4" />
           </button>
 
           {showLayerMenu && (
-            <div className="absolute right-0 mt-2 w-44 rounded-xl bg-slate-900/95 border border-slate-700 p-1.5 shadow-2xl backdrop-blur-md flex flex-col gap-1 text-xs">
+            <div className="absolute right-0 mt-2 w-48 rounded-xl bg-white/98 dark:bg-[#19201D]/98 border border-[#E5DFD3] dark:border-[#2E3C34] p-1.5 shadow-xl backdrop-blur-md flex flex-col gap-1 text-xs">
               {(Object.keys(TILE_LAYERS) as TileLayerKey[]).map((key) => (
                 <button
                   key={key}
@@ -330,14 +392,14 @@ export const Map: React.FC<MapProps> = ({
                     setActiveTile(key);
                     setShowLayerMenu(false);
                   }}
-                  className={`px-3 py-2 rounded-lg text-left transition-colors flex items-center justify-between ${
+                  className={`px-3 py-2 rounded-lg text-left transition-colors flex items-center justify-between cursor-pointer ${
                     activeTile === key
-                      ? 'bg-emerald-500/20 text-emerald-300 font-medium border border-emerald-500/40'
-                      : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      ? 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/30 text-[#2D4F3E] dark:text-[#8EB39F] font-semibold border border-[#2D4F3E]/30 dark:border-[#5C8E76]/40'
+                      : 'text-stone-700 dark:text-stone-300 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
                   }`}
                 >
                   <span>{TILE_LAYERS[key].name}</span>
-                  {activeTile === key && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                  {activeTile === key && <span className="w-1.5 h-1.5 rounded-full bg-[#2D4F3E] dark:bg-[#8EB39F]" />}
                 </button>
               ))}
             </div>
@@ -345,12 +407,12 @@ export const Map: React.FC<MapProps> = ({
         </div>
 
         {/* Zoom Controls */}
-        <div className="flex flex-col rounded-xl bg-slate-900/90 border border-slate-700 backdrop-blur-md shadow-lg overflow-hidden">
+        <div className="flex flex-col rounded-xl bg-white/95 dark:bg-[#19201D]/95 border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-md shadow-md overflow-hidden">
           <button
             id="map-zoom-in-btn"
             onClick={handleZoomIn}
             aria-label="Zoom in"
-            className="p-2.5 text-slate-200 hover:text-white hover:bg-slate-800 transition-colors border-b border-slate-800"
+            className="p-2.5 text-stone-700 dark:text-stone-200 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A] transition-colors border-b border-[#E5DFD3] dark:border-[#2E3C34] cursor-pointer"
           >
             <ZoomIn className="w-4 h-4" />
           </button>
@@ -358,7 +420,7 @@ export const Map: React.FC<MapProps> = ({
             id="map-zoom-out-btn"
             onClick={handleZoomOut}
             aria-label="Zoom out"
-            className="p-2.5 text-slate-200 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-2.5 text-stone-700 dark:text-stone-200 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A] transition-colors cursor-pointer"
           >
             <ZoomOut className="w-4 h-4" />
           </button>
@@ -369,7 +431,7 @@ export const Map: React.FC<MapProps> = ({
           id="map-recenter-btn"
           onClick={handleRecenter}
           aria-label="Recenter map"
-          className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-700 text-slate-200 hover:text-white hover:bg-slate-800 backdrop-blur-md shadow-lg transition-all"
+          className="p-2.5 rounded-xl bg-white/95 dark:bg-[#19201D]/95 border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-200 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A] backdrop-blur-md shadow-md transition-all cursor-pointer"
         >
           <Navigation className="w-4 h-4" />
         </button>
@@ -379,7 +441,7 @@ export const Map: React.FC<MapProps> = ({
           id="map-fullscreen-btn"
           onClick={toggleFullscreen}
           aria-label="Toggle full screen"
-          className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-700 text-slate-200 hover:text-white hover:bg-slate-800 backdrop-blur-md shadow-lg transition-all"
+          className="p-2.5 rounded-xl bg-white/95 dark:bg-[#19201D]/95 border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-200 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A] backdrop-blur-md shadow-md transition-all cursor-pointer"
         >
           {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
         </button>
@@ -388,39 +450,40 @@ export const Map: React.FC<MapProps> = ({
       {/* Top Left Status Badge */}
       <div className="absolute top-4 left-4 z-[400] flex flex-wrap items-center gap-2 pointer-events-none">
         {route ? (
-          <div className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700/80 backdrop-blur-md shadow-xl flex items-center gap-2">
+          <div className="px-3.5 py-1.5 rounded-xl bg-white/95 dark:bg-[#19201D]/95 border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-md shadow-lg flex items-center gap-2">
             <span
-              className={`w-2 h-2 rounded-full animate-pulse ${
+              className={`w-2 h-2 rounded-full ${
                 route.routeType === 'gps_art'
-                  ? 'bg-purple-400'
+                  ? 'bg-[#8A4A72]'
                   : route.activity === 'bike'
-                  ? 'bg-cyan-400'
-                  : 'bg-emerald-400'
+                  ? 'bg-[#C86432]'
+                  : 'bg-[#2D4F3E] dark:bg-[#8EB39F]'
               }`}
             />
-            <span className="text-xs font-semibold text-slate-100">
+            <span className="text-xs font-semibold text-[#1E2A24] dark:text-[#E8EAE6]">
               {route.name}
             </span>
-            <span className="text-[11px] font-mono text-slate-400">
+            <span className="text-[11px] font-mono text-stone-500 dark:text-stone-400">
               {route.stats.distanceKm} km
             </span>
           </div>
         ) : (
-          <div className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700/80 backdrop-blur-md shadow-xl flex items-center gap-2 text-xs text-slate-300">
-            <span className="text-emerald-400">📍</span> Click anywhere on map to set start point
+          <div className="px-3.5 py-1.5 rounded-xl bg-white/95 dark:bg-[#19201D]/95 border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-md shadow-lg flex items-center gap-2 text-xs text-[#2D4F3E] dark:text-[#8EB39F] font-medium">
+            <MapPin className="w-3.5 h-3.5 text-[#C86432]" />
+            <span>Click map to place start point or drag pin</span>
           </div>
         )}
 
         {route?.privacy.applied && (
-          <div className="px-2.5 py-1 rounded-xl bg-blue-950/80 border border-blue-600/40 backdrop-blur-md shadow-lg flex items-center gap-1.5 text-[11px] text-blue-300">
-            <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-            <span>500m PostGIS Mask Active</span>
+          <div className="px-2.5 py-1 rounded-xl bg-[#EAF2ED] dark:bg-[#162920] border border-[#B7D4C4] dark:border-[#2F4D3C] backdrop-blur-md shadow-sm flex items-center gap-1.5 text-[11px] text-[#2D4F3E] dark:text-[#8EB39F] font-medium">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#8EB39F]" />
+            <span>500m Privacy Protected</span>
           </div>
         )}
       </div>
 
       {/* Coordinate & Scale HUD (Bottom Left) */}
-      <div className="absolute bottom-3 left-4 z-[400] pointer-events-none hidden sm:flex items-center gap-3 text-[10px] font-mono text-slate-400 bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800/80 backdrop-blur-sm">
+      <div className="absolute bottom-3 left-4 z-[400] pointer-events-none hidden sm:flex items-center gap-3 text-[10px] font-mono text-stone-600 dark:text-stone-400 bg-white/90 dark:bg-[#121614]/90 px-3 py-1 rounded-lg border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-sm shadow-sm">
         <span>LAT: {selectedLocation.lat.toFixed(4)}</span>
         <span>LNG: {selectedLocation.lng.toFixed(4)}</span>
         {route && <span>PTS: {route.coordinates.length}</span>}
