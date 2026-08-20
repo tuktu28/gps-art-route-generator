@@ -120,6 +120,7 @@ export default function App() {
         elevationPreference: params.elevationPreference,
         privacyMaskingEnabled: params.privacyMaskingEnabled,
         unit: params.unit,
+        apiConfig,
       });
 
       setCurrentRoute(route);
