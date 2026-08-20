@@ -633,14 +633,14 @@ export function applyPrivacyMasking(
  */
 export function generateElevationProfile(
   coordinates: [number, number][],
-  elevationPreference: ElevationPreference = 'moderate',
+  elevationPreference: ElevationPreference = 'flat',
   unit: DistanceUnit = 'km'
 ): { profile: ElevationPoint[]; gainM: number; lossM: number; highestM: number; lowestM: number } {
   const profile: ElevationPoint[] = [];
   let currentDistM = 0;
 
   const baseElevation = 45 + Math.sin(coordinates[0][0] * 10) * 20;
-  const scale = elevationPreference === 'flat' ? 8 : elevationPreference === 'moderate' ? 28 : 65;
+  const scale = elevationPreference === 'flat' ? 4 : elevationPreference === 'moderate' ? 24 : 60;
 
   let prevEle = baseElevation;
   let gainM = 0;
