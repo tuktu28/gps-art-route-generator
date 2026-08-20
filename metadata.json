@@ -1,0 +1,10 @@
+{
+  "name": "Route Generator",
+  "description": "Privacy-first spatial route and GPS Art generator for runners, cyclists, and hikers with elevation analytics, PostGIS privacy masking, and GPX export.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
