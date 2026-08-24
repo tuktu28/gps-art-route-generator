@@ -49,6 +49,8 @@ export interface GeneratedRoute {
   elevationProfile: ElevationPoint[];
   stats: RouteStats;
   privacy: PrivacyMaskInfo;
+  terrainFocus?: string;
+  surfaceType?: string;
   createdAt: string;
   startingAddress: string;
 }
