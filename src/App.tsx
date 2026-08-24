@@ -373,6 +373,12 @@ export default function App() {
                 <span className="w-1.5 h-1.5 rounded-full bg-[#D98A3C]" />
                 <span className="uppercase font-semibold">{currentRoute ? 'ACTIVE ROUTE' : 'DRAG PIN TO MOVE'}</span>
               </div>
+
+              {currentRoute?.terrainFocus && (
+                <div className="px-2.5 py-1 rounded-full bg-[#FAF7F2]/95 dark:bg-[#161D1A]/95 border border-[#E5DFD3] dark:border-[#2E3C34] shadow-md backdrop-blur-sm text-[10px] font-mono text-stone-700 dark:text-stone-300 flex items-center gap-1.5">
+                  <span className="font-semibold text-[#2D4F3E] dark:text-[#7EB89B]">{currentRoute.terrainFocus}</span>
+                </div>
+              )}
             </div>
 
             <Map
