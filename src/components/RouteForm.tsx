@@ -315,6 +315,34 @@ export const RouteForm: React.FC<RouteFormProps> = ({
             );
           })}
         </div>
+
+        {/* Activity Terrain Bias Feedback */}
+        {activity === 'run' && (
+          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#2D4F3E]/8 dark:bg-[#3D6B56]/15 border border-[#2D4F3E]/20 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
+            <Footprints className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B] shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-[#2D4F3E] dark:text-[#7EB89B]">Greenbelt & Sidewalk Priority:</strong> Routes bias through greenways, parks, sidewalks, and quiet neighborhood streets while avoiding heavy traffic.
+            </span>
+          </div>
+        )}
+
+        {activity === 'hike' && (
+          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#8C6838]/10 dark:bg-[#8C6838]/20 border border-[#8C6838]/30 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
+            <Mountain className="w-3.5 h-3.5 text-[#8C6838] dark:text-[#DFBD84] shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-[#8C6838] dark:text-[#DFBD84]">Actual Trail Priority:</strong> Routes seek unpaved nature trails, designated hiking footpaths, nature reserve tracks, and singletracks.
+            </span>
+          </div>
+        )}
+
+        {activity === 'bike' && (
+          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#C86432]/10 dark:bg-[#C86432]/20 border border-[#C86432]/30 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
+            <Bike className="w-3.5 h-3.5 text-[#C86432] shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-[#C86432]">Cycleway Priority:</strong> Routes prioritize designated bike lanes, paved greenways, and low-stress bike-friendly roads.
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 3. Route Type Selector */}
