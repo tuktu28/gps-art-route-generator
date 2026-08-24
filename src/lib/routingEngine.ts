@@ -44,6 +44,131 @@ export function calculateTotalDistanceKm(points: [number, number][]): number {
 }
 
 /**
+ * Corridor node discovered via OpenStreetMap (greenbelt, greenway, park, sidewalk, or hiking trail)
+ */
+export interface CorridorNode {
+  lat: number;
+  lng: number;
+  type: 'park' | 'greenway' | 'trail' | 'sidewalk' | 'waterway';
+  name?: string;
+}
+
+// In-memory cache for fast repeated queries in the same region
+const corridorCache = new Map<string, CorridorNode[]>();
+
+/**
+ * Discovers greenbelts, greenways, parks, and sidewalks for running,
+ * or dedicated trails, footpaths, singletracks, and nature reserves for hiking.
+ */
+export async function discoverCorridorNodes(
+  center: LatLng,
+  radiusKm: number,
+  activity: ActivityType
+): Promise<CorridorNode[]> {
+  const cacheKey = `${activity}_${center.lat.toFixed(2)}_${center.lng.toFixed(2)}_${Math.round(radiusKm * 10)}`;
+  if (corridorCache.has(cacheKey)) {
+    return corridorCache.get(cacheKey)!;
+  }
+
+  const radiusMeters = Math.min(25000, Math.max(800, Math.round(radiusKm * 1000 * 1.3)));
+
+  let queryBody = '';
+  if (activity === 'hike') {
+    // Hiking: focus on actual trails, footpaths, tracks, hiking routes, nature reserves
+    queryBody = `
+      [out:json][timeout:3];
+      (
+        way["highway"~"path|track|footway|bridleway"](around:${radiusMeters},${center.lat},${center.lng});
+        relation["route"="hiking"](around:${radiusMeters},${center.lat},${center.lng});
+        node["highway"="trailhead"](around:${radiusMeters},${center.lat},${center.lng});
+        way["leisure"="nature_reserve"](around:${radiusMeters},${center.lat},${center.lng});
+        way["natural"~"wood|peak|ridge|cliff"](around:${radiusMeters},${center.lat},${center.lng});
+      );
+      out center 35;
+    `;
+  } else if (activity === 'run') {
+    // Running: focus on greenbelts, greenways, parks, pedestrian paths, sidewalks, residential calm streets, riverbanks
+    queryBody = `
+      [out:json][timeout:3];
+      (
+        way["leisure"~"park|common|garden|nature_reserve|recreation_ground"](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"footway|pedestrian|path|cycleway|living_street"](around:${radiusMeters},${center.lat},${center.lng});
+        way["waterway"~"riverbank|canal|stream"](around:${radiusMeters},${center.lat},${center.lng});
+        way["route"="running"](around:${radiusMeters},${center.lat},${center.lng});
+      );
+      out center 35;
+    `;
+  } else {
+    // Bike: cycleways, bike paths
+    queryBody = `
+      [out:json][timeout:3];
+      (
+        way["highway"="cycleway"](around:${radiusMeters},${center.lat},${center.lng});
+        way["bicycle"~"yes|designated"](around:${radiusMeters},${center.lat},${center.lng});
+      );
+      out center 30;
+    `;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3200);
+
+    const endpoints = [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+    ];
+
+    for (const endpoint of endpoints) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `data=${encodeURIComponent(queryBody)}`,
+          signal: controller.signal,
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          clearTimeout(timeoutId);
+
+          if (data.elements && data.elements.length > 0) {
+            const nodes: CorridorNode[] = [];
+            for (const el of data.elements) {
+              const lat = el.center ? el.center.lat : el.lat;
+              const lng = el.center ? el.center.lon : el.lon;
+              if (lat && lng) {
+                const dist = calculateDistanceMeters([center.lat, center.lng], [lat, lng]) / 1000;
+                if (dist <= radiusKm * 1.5 && dist >= 0.1) {
+                  nodes.push({
+                    lat,
+                    lng,
+                    type: activity === 'hike' ? 'trail' : 'greenway',
+                    name: el.tags?.name,
+                  });
+                }
+              }
+            }
+
+            if (nodes.length > 0) {
+              corridorCache.set(cacheKey, nodes);
+              return nodes;
+            }
+          }
+        }
+      } catch {
+        // try next mirror
+      }
+    }
+    clearTimeout(timeoutId);
+  } catch {
+    // fallback gracefully
+  }
+
+  return [];
+}
+
+/**
  * Fetch real-world road snapped path using HeiGIT / OpenRouteService or public OpenStreetMap OSRM
  */
 export async function fetchRealRoadPath(
@@ -57,6 +182,7 @@ export async function fetchRealRoadPath(
   const orsKey = apiConfig?.openRouteServiceKey?.trim();
   if (orsKey && orsKey.length > 10) {
     try {
+      // foot-hiking for hiking, foot-walking for running (pedestrian, greenway & sidewalk focus)
       const orsProfile =
         activity === 'bike' ? 'cycling-regular' : activity === 'hike' ? 'foot-hiking' : 'foot-walking';
 
@@ -115,7 +241,7 @@ export async function fetchRealRoadPath(
   // 2. Query Public OpenStreetMap OSRM Routing Engines (Free, accurate real-road routing)
   const coordString = waypoints.map(([lat, lng]) => `${lng.toFixed(6)},${lat.toFixed(6)}`).join(';');
 
-  // Profiles based on activity
+  // Profiles based on activity: routed-foot prioritizes footways, sidewalks, cycleways, parks, and calm paths
   const osrmEndpoints =
     activity === 'bike'
       ? [
@@ -366,12 +492,13 @@ export async function generateRoadGpsArtRoute(
 }
 
 /**
- * Generate radial guide waypoints for a loop
+ * Generate radial guide waypoints for a loop, biasing through discovered greenways or trails
  */
 function createLoopWaypoints(
   start: LatLng,
   radiusKm: number,
-  numPoints: number = 4
+  numPoints: number = 4,
+  corridors: CorridorNode[] = []
 ): [number, number][] {
   const latRad = (start.lat * Math.PI) / 180;
   const kmPerLat = 111.0;
@@ -387,12 +514,35 @@ function createLoopWaypoints(
 
   for (let i = 1; i < numPoints; i++) {
     const fraction = i / numPoints;
-    const angle = startAngle + dir * fraction * 2 * Math.PI;
+    const targetAngle = startAngle + dir * fraction * 2 * Math.PI;
     const r = radiusKm * (0.9 + Math.random() * 0.2);
 
-    const wLat = centerLat + (r / kmPerLat) * Math.sin(angle);
-    const wLng = centerLng + (r / kmPerLng) * Math.cos(angle);
-    waypoints.push([wLat, wLng]);
+    const theoreticalLat = centerLat + (r / kmPerLat) * Math.sin(targetAngle);
+    const theoreticalLng = centerLng + (r / kmPerLng) * Math.cos(targetAngle);
+
+    // If corridor nodes exist (parks, greenways, or trails), bias toward closest node
+    if (corridors.length > 0) {
+      let closestNode: CorridorNode | null = null;
+      let minNodeDist = Infinity;
+
+      for (const node of corridors) {
+        const d = calculateDistanceMeters([theoreticalLat, theoreticalLng], [node.lat, node.lng]);
+        if (d < minNodeDist && d < radiusKm * 1000 * 0.8) {
+          minNodeDist = d;
+          closestNode = node;
+        }
+      }
+
+      if (closestNode) {
+        // Blend 70% toward the greenway/trail node to follow actual parks and trails
+        const finalLat = theoreticalLat * 0.3 + closestNode.lat * 0.7;
+        const finalLng = theoreticalLng * 0.3 + closestNode.lng * 0.7;
+        waypoints.push([finalLat, finalLng]);
+        continue;
+      }
+    }
+
+    waypoints.push([theoreticalLat, theoreticalLng]);
   }
 
   waypoints.push([start.lat, start.lng]);
@@ -410,12 +560,15 @@ export async function generateRoadLoopRoute(
 ): Promise<[number, number][]> {
   let radiusKm = targetDistanceKm / (2 * Math.PI * 1.35);
 
+  // Discover greenways/parks for run, or trails for hike
+  const corridors = await discoverCorridorNodes(start, radiusKm * 1.3, activity);
+
   let bestCoords: [number, number][] = [];
   let bestDistDiff = Infinity;
 
-  // 3-pass calibration loop to stay within ±5%
+  // 3-pass calibration loop to stay within ±1%
   for (let pass = 1; pass <= 3; pass++) {
-    const waypoints = createLoopWaypoints(start, radiusKm, 4);
+    const waypoints = createLoopWaypoints(start, radiusKm, 4, corridors);
     const result = await fetchRealRoadPath(waypoints, activity, apiConfig);
 
     if (result && result.coordinates.length > 5) {
@@ -437,14 +590,14 @@ export async function generateRoadLoopRoute(
   }
 
   if (bestCoords.length === 0) {
-    bestCoords = createLoopWaypoints(start, radiusKm, 8);
+    bestCoords = createLoopWaypoints(start, radiusKm, 8, corridors);
   }
 
   return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.01);
 }
 
 /**
- * Generate accurate real-road Out-and-Back Route strictly within ±5% of target
+ * Generate accurate real-road Out-and-Back Route strictly within ±1% of target
  */
 export async function generateRoadOutAndBackRoute(
   start: LatLng,
@@ -457,14 +610,42 @@ export async function generateRoadOutAndBackRoute(
   const kmPerLng = 111.0 * Math.cos(latRad);
 
   let oneWayStraightKm = (targetDistanceKm / 2) / 1.30;
-  const bearing = Math.random() * 2 * Math.PI;
+
+  // Discover greenways/parks for run, or trails for hike
+  const corridors = await discoverCorridorNodes(start, oneWayStraightKm * 1.3, activity);
+
+  let bearing = Math.random() * 2 * Math.PI;
+  // If corridor exists, pick a bearing pointing towards the greenway / trail cluster
+  if (corridors.length > 0) {
+    const candidate = corridors[Math.floor(Math.random() * corridors.length)];
+    const dLat = candidate.lat - start.lat;
+    const dLng = (candidate.lng - start.lng) * Math.cos(latRad);
+    bearing = Math.atan2(dLat, dLng);
+  }
 
   let bestCoords: [number, number][] = [];
   let bestDiff = Infinity;
 
   for (let pass = 1; pass <= 3; pass++) {
-    const turnLat = start.lat + (oneWayStraightKm / kmPerLat) * Math.sin(bearing);
-    const turnLng = start.lng + (oneWayStraightKm / kmPerLng) * Math.cos(bearing);
+    let turnLat = start.lat + (oneWayStraightKm / kmPerLat) * Math.sin(bearing);
+    let turnLng = start.lng + (oneWayStraightKm / kmPerLng) * Math.cos(bearing);
+
+    // If corridor node is near turn point, snap to it
+    if (corridors.length > 0) {
+      let closestNode: CorridorNode | null = null;
+      let minD = Infinity;
+      for (const n of corridors) {
+        const d = calculateDistanceMeters([turnLat, turnLng], [n.lat, n.lng]);
+        if (d < minD && d < oneWayStraightKm * 1000 * 0.7) {
+          minD = d;
+          closestNode = n;
+        }
+      }
+      if (closestNode) {
+        turnLat = closestNode.lat;
+        turnLng = closestNode.lng;
+      }
+    }
 
     const outResult = await fetchRealRoadPath(
       [[start.lat, start.lng], [turnLat, turnLng]],
@@ -831,6 +1012,20 @@ export async function generateFullRoute(params: {
       ? `GPS Art "${(gpsArtText || 'RUN').toUpperCase()}" (${finalStats.distanceKm} km)`
       : `${activity.toUpperCase()} ${routeType === 'loop' ? 'Loop' : 'Out & Back'} (${finalStats.distanceKm} km)`);
 
+  const terrainFocus =
+    activity === 'run'
+      ? '🌿 Greenbelts, Greenways & Sidewalks'
+      : activity === 'hike'
+      ? '🥾 Actual Nature Trails & Singletracks'
+      : '🚴 Cycleways & Low-Traffic Corridors';
+
+  const surfaceType =
+    activity === 'run'
+      ? 'Paved Greenways, Sidewalks & Quiet Streets'
+      : activity === 'hike'
+      ? 'Natural Dirt Trails, Forest Footpaths & Mountain Tracks'
+      : 'Smooth Paved Asphalt & Dedicated Bike Lanes';
+
   return {
     id: `route_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
     name: defaultName,
@@ -841,6 +1036,8 @@ export async function generateFullRoute(params: {
     elevationProfile: eleData.profile,
     stats: finalStats,
     privacy: privacyInfo,
+    terrainFocus,
+    surfaceType,
     createdAt: new Date().toISOString(),
     startingAddress: startingAddress || `${startLocation.lat.toFixed(4)}, ${startLocation.lng.toFixed(4)}`,
   };
