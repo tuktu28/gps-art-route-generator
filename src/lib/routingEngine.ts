@@ -283,7 +283,7 @@ export async function fetchRealRoadPath(
 }
 
 /**
- * Snap a multi-waypoint sequence onto real streets in small chunks to avoid URL length limitations
+ * Snap a multi-waypoint sequence onto real streets in small chunks to guarantee precise street-by-street routing
  */
 export async function snapWaypointsToRealRoads(
   waypoints: [number, number][],
@@ -294,11 +294,24 @@ export async function snapWaypointsToRealRoads(
     return { coordinates: waypoints, distanceKm: 0 };
   }
 
-  const chunkSize = 8; // Optimal batch size for street routing
+  // Deduplicate consecutive identical waypoints
+  const cleanWaypoints: [number, number][] = [];
+  for (let i = 0; i < waypoints.length; i++) {
+    const pt = waypoints[i];
+    if (
+      cleanWaypoints.length === 0 ||
+      Math.abs(pt[0] - cleanWaypoints[cleanWaypoints.length - 1][0]) > 0.00001 ||
+      Math.abs(pt[1] - cleanWaypoints[cleanWaypoints.length - 1][1]) > 0.00001
+    ) {
+      cleanWaypoints.push(pt);
+    }
+  }
+
+  const chunkSize = 3; // 2-3 points per segment to guarantee crisp street-by-street adherence
   const allCoords: [number, number][] = [];
 
-  for (let i = 0; i < waypoints.length - 1; i += chunkSize - 1) {
-    const chunk = waypoints.slice(i, Math.min(waypoints.length, i + chunkSize));
+  for (let i = 0; i < cleanWaypoints.length - 1; i += chunkSize - 1) {
+    const chunk = cleanWaypoints.slice(i, Math.min(cleanWaypoints.length, i + chunkSize));
     if (chunk.length < 2) break;
 
     const roadResult = await fetchRealRoadPath(chunk, activity, apiConfig);
@@ -400,46 +413,41 @@ export async function generateRoadGpsArtRoute(
   // Helper to extract key letter stroke waypoints
   const buildGlyphWaypoints = (boxHeightKm: number): [number, number][] => {
     const charWidthKm = boxHeightKm * 0.75;
-    const spacingKm = boxHeightKm * 0.28;
+    const spacingKm = boxHeightKm * 0.30;
     const heightDeg = boxHeightKm / kmPerLat;
     const charWidthDeg = charWidthKm / kmPerLng;
     const spacingDeg = spacingKm / kmPerLng;
 
     const waypoints: [number, number][] = [];
-    let currentPt: [number, number] | null = null;
+    const topLat = start.lat;
+    const bottomLat = start.lat - heightDeg;
 
     tokens.forEach((char, idx) => {
       const glyphPoints = CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['O'];
-      const charOriginLng = start.lng + idx * (charWidthDeg + spacingDeg);
-      const charOriginLat = start.lat;
+      const leftLng = start.lng + idx * (charWidthDeg + spacingDeg);
 
       const mappedPoints: [number, number][] = glyphPoints.map(([x, y]) => {
-        const ptLat = charOriginLat + y * heightDeg;
-        const ptLng = charOriginLng + x * charWidthDeg;
+        const ptLat = bottomLat + y * heightDeg;
+        const ptLng = leftLng + x * charWidthDeg;
         return [ptLat, ptLng];
       });
 
-      if (!currentPt) {
+      if (waypoints.length === 0) {
         waypoints.push(...mappedPoints);
-        currentPt = mappedPoints[mappedPoints.length - 1];
       } else {
-        // baseline traverse connector
-        const baselineLat = charOriginLat;
+        // top street corridor connector
         const nextStart = mappedPoints[0];
-        waypoints.push([baselineLat, currentPt[1]]);
-        waypoints.push([baselineLat, nextStart[1]]);
+        waypoints.push([topLat, nextStart[1]]);
         waypoints.push(...mappedPoints);
-        currentPt = mappedPoints[mappedPoints.length - 1];
       }
     });
 
-    // Return to start along parallel street
-    if (currentPt && waypoints.length > 0) {
-      const firstPoint = waypoints[0];
-      const returnLat = start.lat - heightDeg * 0.22;
-      waypoints.push([returnLat, currentPt[1]]);
-      waypoints.push([returnLat, firstPoint[1]]);
-      waypoints.push([firstPoint[0], firstPoint[1]]);
+    // Return to start along bottom street corridor to close the loop
+    if (waypoints.length > 0) {
+      const lastPoint = waypoints[waypoints.length - 1];
+      waypoints.push([bottomLat, lastPoint[1]]);
+      waypoints.push([bottomLat, start.lng]);
+      waypoints.push([topLat, start.lng]);
     }
 
     return waypoints;
