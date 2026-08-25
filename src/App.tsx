@@ -134,14 +134,15 @@ export default function App() {
 
         {/* Action Controls & Theme Toggle */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Guide Documentation Modal Button */}
+          {/* How-To Modal Button */}
           <button
             id="open-guide-btn"
             onClick={() => setIsGuideModalOpen(true)}
+            title="How To Use Wayline"
             className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-[#1E2723] border border-[#E5DFD3] dark:border-[#2E3C34] hover:border-[#2D4F3E]/40 text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white shadow-xs text-xs font-semibold transition-all cursor-pointer"
           >
             <BookOpen className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
-            <span>Guide</span>
+            <span>How To</span>
           </button>
 
           {/* Light / Dark Mode Toggle */}
@@ -203,9 +204,9 @@ export default function App() {
       {/* ================= MAIN CONTENT WORKSPACE ================= */}
       <main className="flex-1 w-full max-w-[1700px] mx-auto p-3 sm:p-5 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* LEFT COLUMN: Route Designer Controls (4 cols on lg) */}
-        <aside className="lg:col-span-4 flex flex-col gap-4">
-          <div className="p-4 sm:p-5 rounded-3xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm flex flex-col gap-4 transition-colors">
-            <div className="flex items-center justify-between border-b border-[#E5DFD3] dark:border-[#2E3C34] pb-3">
+        <aside className="lg:col-span-4 flex flex-col">
+          <div className="flex-1 flex flex-col p-4 sm:p-5 rounded-3xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm transition-colors">
+            <div className="flex items-center justify-between border-b border-[#E5DFD3] dark:border-[#2E3C34] pb-3 mb-4">
               <div className="flex flex-col">
                 <span className="text-[10px] font-mono uppercase tracking-widest text-[#D98A3C] font-bold">ROUTE RECIPE</span>
                 <h3 className="text-lg font-serif font-bold text-stone-900 dark:text-stone-100">Set the feeling.</h3>
