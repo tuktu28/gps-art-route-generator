@@ -236,10 +236,11 @@ export const RouteForm: React.FC<RouteFormProps> = ({
     <form
       id="route-generator-form"
       onSubmit={handleSubmit}
-      className="flex flex-col gap-4 text-[#1E2A24] dark:text-[#E8EAE6]"
+      className="flex-1 flex flex-col justify-between gap-4 text-[#1E2A24] dark:text-[#E8EAE6]"
     >
-      {/* 1. Address Search / Starting Location */}
-      <div ref={searchContainerRef} className="relative flex flex-col gap-1.5">
+      <div className="flex flex-col gap-4">
+        {/* 1. Address Search / Starting Location */}
+        <div ref={searchContainerRef} className="relative flex flex-col gap-1.5">
         <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 flex items-center justify-between">
           <span className="flex items-center gap-1.5">
             <MapPin className="w-3.5 h-3.5 text-[#C86432]" />
@@ -580,13 +581,14 @@ export const RouteForm: React.FC<RouteFormProps> = ({
           </div>
         </div>
       )}
+      </div>
 
       {/* Generate Route CTA Button */}
       <button
         type="submit"
         id="generate-route-submit-btn"
         disabled={isLoading}
-        className="w-full py-3.5 px-4 rounded-xl bg-[#2D4F3E] hover:bg-[#233F31] active:bg-[#1C3328] text-white font-bold text-sm tracking-wide shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full mt-auto pt-3.5 pb-3.5 px-4 rounded-xl bg-[#2D4F3E] hover:bg-[#233F31] active:bg-[#1C3328] text-white font-bold text-sm tracking-wide shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isLoading ? (
           <>
