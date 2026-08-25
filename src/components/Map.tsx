@@ -507,7 +507,7 @@ export const Map: React.FC<MapProps> = ({
       </div>
 
       {/* Coordinate & Scale HUD (Bottom Left) */}
-      <div className="absolute bottom-3 left-4 z-[400] pointer-events-none hidden sm:flex items-center gap-3 text-[10px] font-mono text-stone-600 dark:text-stone-400 bg-white/90 dark:bg-[#121614]/90 px-3 py-1 rounded-lg border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-sm shadow-sm">
+      <div className="absolute bottom-3 left-4 z-10 pointer-events-none hidden sm:flex items-center gap-3 text-[10px] font-mono text-stone-600 dark:text-stone-400 bg-white/90 dark:bg-[#121614]/90 px-3 py-1 rounded-lg border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-sm shadow-sm">
         <span>LAT: {selectedLocation.lat.toFixed(4)}</span>
         <span>LNG: {selectedLocation.lng.toFixed(4)}</span>
         {route && <span>PTS: {route.coordinates.length}</span>}

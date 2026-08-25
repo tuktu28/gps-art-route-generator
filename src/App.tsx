@@ -1,51 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import {
   ActivityType,
-  ApiConfiguration,
   DistanceUnit,
   ElevationPoint,
   ElevationPreference,
   GeneratedRoute,
   LatLng,
-  SavedRoute,
 } from './types/route';
 import { generateFullRoute } from './lib/routingEngine';
 import { downloadGpxFile } from './lib/gpxExporter';
-import {
-  getSavedRoutesFromLocal,
-  saveRouteToLocal,
-  deleteRouteFromLocal,
-  updateRouteInLocal,
-  saveRouteToSupabase,
-} from './lib/supabaseClient';
 import { Map } from './components/Map';
 import { ElevationChart } from './components/ElevationChart';
 import { RouteForm } from './components/RouteForm';
-import { SavedRoutesModal } from './components/SavedRoutesModal';
-import { ApiSettingsModal } from './components/ApiSettingsModal';
 import { MasterGuideModal } from './components/MasterGuideModal';
 import {
   Activity,
-  Bookmark,
   BookOpen,
-  Check,
   Clock,
-  Compass,
   Download,
   Flame,
-  Footprints,
-  Layers,
-  MapPin,
   Moon,
   Mountain,
-  Navigation,
-  Save,
-  ShieldCheck,
-  Sliders,
   Sparkles,
   Sun,
-  Trees,
-  Zap,
 } from 'lucide-react';
 
 const DEFAULT_START_LOCATION: LatLng = {
@@ -90,35 +67,8 @@ export default function App() {
   // Elevation Hover Synchronization
   const [hoveredElevationPoint, setHoveredElevationPoint] = useState<ElevationPoint | null>(null);
 
-  // Saved Routes
-  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
-  const [isSavedModalOpen, setIsSavedModalOpen] = useState<boolean>(false);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
+  // Modals
   const [isGuideModalOpen, setIsGuideModalOpen] = useState<boolean>(false);
-
-  // Save feedback state
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
-
-  // API Configuration state
-  const [apiConfig, setApiConfig] = useState<ApiConfiguration>(() => {
-    try {
-      const stored = localStorage.getItem('gps_art_api_config');
-      return stored ? JSON.parse(stored) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  // Load initial saved routes from local storage
-  useEffect(() => {
-    setSavedRoutes(getSavedRoutesFromLocal());
-  }, []);
-
-  // Save API config to storage
-  const handleSaveApiConfig = (newCfg: ApiConfiguration) => {
-    setApiConfig(newCfg);
-    localStorage.setItem('gps_art_api_config', JSON.stringify(newCfg));
-  };
 
   // Generate Route Handler
   const handleGenerateRoute = async (params: {
@@ -128,14 +78,12 @@ export default function App() {
     routeType: any;
     targetDistanceKm: number;
     gpsArtText?: string;
-    routeName?: string;
     elevationPreference: ElevationPreference;
-    privacyMaskingEnabled: boolean;
     unit: DistanceUnit;
   }) => {
     setIsLoading(true);
     try {
-      await new Promise((res) => setTimeout(res, 500));
+      await new Promise((res) => setTimeout(res, 300));
 
       const route = await generateFullRoute({
         startLocation: params.startLocation,
@@ -144,11 +92,8 @@ export default function App() {
         routeType: params.routeType,
         targetDistanceKm: params.targetDistanceKm,
         gpsArtText: params.gpsArtText,
-        routeName: params.routeName,
         elevationPreference: params.elevationPreference,
-        privacyMaskingEnabled: params.privacyMaskingEnabled,
         unit: params.unit,
-        apiConfig,
       });
 
       setCurrentRoute(route);
@@ -166,46 +111,6 @@ export default function App() {
     setSelectedAddress(`Pin Location (${latLng.lat.toFixed(4)}, ${latLng.lng.toFixed(4)})`);
   };
 
-  // Save Current Route
-  const handleSaveCurrentRoute = async () => {
-    if (!currentRoute) return;
-
-    setSaveStatus('Saving...');
-    const res = await saveRouteToSupabase(
-      currentRoute,
-      apiConfig.supabaseUrl,
-      apiConfig.supabaseAnonKey
-    );
-
-    setSavedRoutes(getSavedRoutesFromLocal());
-    setSaveStatus('Saved!');
-    setTimeout(() => setSaveStatus(null), 2500);
-  };
-
-  // Delete Route
-  const handleDeleteRoute = (id: string) => {
-    deleteRouteFromLocal(id);
-    setSavedRoutes(getSavedRoutesFromLocal());
-  };
-
-  // Rename / Update Route
-  const handleUpdateRoute = (id: string, updates: Partial<SavedRoute>) => {
-    updateRouteInLocal(id, updates);
-    setSavedRoutes(getSavedRoutesFromLocal());
-  };
-
-  // Load Saved Route to Active Canvas
-  const handleLoadSavedRoute = (route: GeneratedRoute) => {
-    setCurrentRoute(route);
-    if (route.coordinates.length > 0) {
-      setSelectedLocation({
-        lat: route.coordinates[0][0],
-        lng: route.coordinates[0][1],
-      });
-      setSelectedAddress(route.startingAddress || 'Saved Route Starting Point');
-    }
-  };
-
   return (
     <div className="min-h-screen bg-[#F8F6F0] dark:bg-[#121715] text-stone-800 dark:text-stone-100 flex flex-col font-sans transition-colors duration-200 selection:bg-[#2D4F3E] selection:text-white">
       {/* ================= HEADER NAVBAR ================= */}
@@ -213,7 +118,7 @@ export default function App() {
         {/* Brand Header */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-[#2D4F3E] dark:bg-[#3D6B56] flex items-center justify-center shadow-md shadow-[#2D4F3E]/20 text-white font-serif">
-            <Compass className="w-5 h-5 stroke-[2.2]" />
+            <Activity className="w-5 h-5 text-white" />
           </div>
           <div>
             <div className="flex items-center gap-2">
@@ -229,6 +134,16 @@ export default function App() {
 
         {/* Action Controls & Theme Toggle */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Guide Documentation Modal Button */}
+          <button
+            id="open-guide-btn"
+            onClick={() => setIsGuideModalOpen(true)}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-[#1E2723] border border-[#E5DFD3] dark:border-[#2E3C34] hover:border-[#2D4F3E]/40 text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white shadow-xs text-xs font-semibold transition-all cursor-pointer"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
+            <span>Guide</span>
+          </button>
+
           {/* Light / Dark Mode Toggle */}
           <button
             id="theme-mode-toggle-btn"
@@ -257,31 +172,6 @@ export default function App() {
           >
             {unit.toUpperCase()}
           </button>
-
-          {/* Saved Routes Library */}
-          <button
-            id="open-saved-routes-btn"
-            onClick={() => setIsSavedModalOpen(true)}
-            className="px-3 py-1.5 rounded-xl bg-white dark:bg-[#1E2723] border border-[#E5DFD3] dark:border-[#2E3C34] hover:border-[#2D4F3E]/40 text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
-          >
-            <Bookmark className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
-            <span className="hidden sm:inline">Library</span>
-            {savedRoutes.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-[#2D4F3E] text-white text-[10px] font-mono font-bold">
-                {savedRoutes.length}
-              </span>
-            )}
-          </button>
-
-          {/* Settings Modal */}
-          <button
-            id="open-api-settings-btn"
-            onClick={() => setIsSettingsModalOpen(true)}
-            title="Configure APIs & Microservice"
-            className="p-2 rounded-xl bg-white dark:bg-[#1E2723] border border-[#E5DFD3] dark:border-[#2E3C34] hover:border-[#2D4F3E]/40 text-stone-600 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white shadow-xs transition-all cursor-pointer"
-          >
-            <Sliders className="w-4 h-4 text-[#C86432]" />
-          </button>
         </div>
       </header>
 
@@ -304,7 +194,7 @@ export default function App() {
           {/* Editorial Note with Amber Bar */}
           <div className="max-w-md border-l-2 border-[#D98A3C] pl-3.5 py-0.5">
             <p className="text-xs sm:text-[13px] text-stone-600 dark:text-stone-300 italic font-serif leading-relaxed">
-              Start with a few deliberate parameters. Preview the shape, then save a route you&apos;ll want to go outside for.
+              Start with a few deliberate parameters. Preview the shape and export a route you&apos;ll want to go outside for.
             </p>
           </div>
         </div>
@@ -339,17 +229,6 @@ export default function App() {
               unit={unit}
               onUnitChange={setUnit}
             />
-          </div>
-
-          {/* Privacy & SOC2 Architectural Card */}
-          <div className="p-4 rounded-2xl bg-white/70 dark:bg-[#19201D]/70 border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-stone-600 dark:text-stone-400 space-y-2 transition-colors">
-            <div className="flex items-center gap-2 text-stone-800 dark:text-stone-200 font-semibold">
-              <ShieldCheck className="w-4 h-4 text-[#2D4F3E] dark:text-[#7EB89B]" />
-              <span>Spatial Privacy & Doorstep Protection</span>
-            </div>
-            <p className="text-[11px] leading-relaxed">
-              PostGIS spatial engine automatically masks user doorstep origins: routes &gt;5km are truncated 500m from start/end; routes &le;5km apply 500m spatial jitter to prevent personal location leakage.
-            </p>
           </div>
         </aside>
 
@@ -386,7 +265,6 @@ export default function App() {
               hoveredElevationPoint={hoveredElevationPoint}
               onMapClick={handleMapClick}
               selectedLocation={selectedLocation}
-              showPrivacyBuffer={true}
               isDarkMode={isDarkMode}
             />
           </div>
@@ -446,25 +324,6 @@ export default function App() {
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2 w-full sm:w-auto justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-[#E5DFD3] dark:border-[#2E3C34]">
-                {/* Save Route CTA */}
-                <button
-                  id="save-route-to-db-btn"
-                  onClick={handleSaveCurrentRoute}
-                  className="px-3.5 py-2 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#ECE5D8] dark:hover:bg-[#2F3D35] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-800 dark:text-stone-200 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                >
-                  {saveStatus ? (
-                    <>
-                  <Check className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
-                  <span className="text-[#2D4F3E] dark:text-[#7EB89B]">{saveStatus}</span>
-                    </>
-                  ) : (
-                    <>
-                  <Save className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
-                  <span>Save Route</span>
-                    </>
-                  )}
-                </button>
-
                 {/* Download GPX CTA */}
                 <button
                   id="download-gpx-btn"
@@ -502,25 +361,7 @@ export default function App() {
       </main>
 
       {/* ================= MODALS ================= */}
-      {/* 1. Saved Routes Library Modal */}
-      <SavedRoutesModal
-        isOpen={isSavedModalOpen}
-        onClose={() => setIsSavedModalOpen(false)}
-        savedRoutes={savedRoutes}
-        onSelectRoute={handleLoadSavedRoute}
-        onDeleteRoute={handleDeleteRoute}
-        onUpdateRoute={handleUpdateRoute}
-      />
-
-      {/* 2. API & Microservice Settings Modal */}
-      <ApiSettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        config={apiConfig}
-        onSaveConfig={handleSaveApiConfig}
-      />
-
-      {/* 3. Master Blueprint Guide Modal (Sections 1-5) */}
+      {/* 1. Master Blueprint Guide Modal */}
       <MasterGuideModal
         isOpen={isGuideModalOpen}
         onClose={() => setIsGuideModalOpen(false)}
