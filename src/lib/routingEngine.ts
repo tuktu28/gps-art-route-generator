@@ -391,8 +391,9 @@ export function enforceDistanceTolerance(
 }
 
 /**
- * Generate authentic road-snapped GPS Art with iterative bounding box scaling
- * to guarantee street snapping AND strict ±5% distance tolerance.
+ * Generate authentic road-snapped GPS Art:
+ * Starts ideally at or near the location marker, optimizing the starting/ending anchor
+ * to the best nearby road intersection for clean, crisp, distortion-free art lines.
  */
 export async function generateRoadGpsArtRoute(
   start: LatLng,
@@ -402,96 +403,96 @@ export async function generateRoadGpsArtRoute(
   apiConfig?: ApiConfiguration
 ): Promise<{ coordinates: [number, number][]; confidenceScore: number }> {
   const clean = text.trim().toUpperCase() || 'RUN';
-  const isSpecialShape = clean === 'HEART' || clean === 'STAR';
-  const tokens = isSpecialShape ? [clean] : clean.replace(/[^A-Z0-9]/g, '').split('');
+  const knownShapes = [
+    'HEART',
+    'STAR',
+    'PACMAN',
+    'TREE',
+    'DIAMOND',
+    'CROWN',
+    'LIGHTNING',
+    'SMILE',
+    'FLOWER',
+    'CAT',
+    'DOG',
+    'HOUSE',
+    'ARROW',
+  ];
+  const isSpecialShape = knownShapes.includes(clean);
+  const tokens = isSpecialShape ? [clean] : clean.replace(/[^A-Z0-9 ]/g, '').split('');
   if (tokens.length === 0) tokens.push('R', 'U', 'N');
 
-  const latRad = (start.lat * Math.PI) / 180;
+  // Discover nearby street intersections/nodes within 350m to anchor the art cleanly
+  const nearbyCorridors = await discoverCorridorNodes(start, 0.35, activity);
+  let anchorStart = { ...start };
+
+  if (nearbyCorridors.length > 0) {
+    let closestNode = nearbyCorridors[0];
+    let minD = calculateDistanceMeters([start.lat, start.lng], [closestNode.lat, closestNode.lng]);
+
+    for (let i = 1; i < nearbyCorridors.length; i++) {
+      const d = calculateDistanceMeters(
+        [start.lat, start.lng],
+        [nearbyCorridors[i].lat, nearbyCorridors[i].lng]
+      );
+      if (d < minD && d >= 20) {
+        minD = d;
+        closestNode = nearbyCorridors[i];
+      }
+    }
+
+    // If an optimal road intersection was found within 350m, anchor the art start there
+    if (minD <= 350) {
+      anchorStart = { lat: closestNode.lat, lng: closestNode.lng };
+    }
+  }
+
+  const latRad = (anchorStart.lat * Math.PI) / 180;
   const kmPerLat = 111.0;
   const kmPerLng = 111.0 * Math.cos(latRad);
 
-  // Helper to extract key letter stroke waypoints
-  const buildGlyphWaypoints = (boxHeightKm: number): [number, number][] => {
-    const charWidthKm = boxHeightKm * 0.75;
-    const spacingKm = boxHeightKm * 0.30;
-    const heightDeg = boxHeightKm / kmPerLat;
-    const charWidthDeg = charWidthKm / kmPerLng;
-    const spacingDeg = spacingKm / kmPerLng;
+  // Determine natural readable scale without arbitrary user restrictions
+  const baseBoxHeightKm = activity === 'bike' ? 0.75 : activity === 'hike' ? 0.35 : 0.45;
+  const charWidthKm = isSpecialShape ? baseBoxHeightKm * 1.15 : baseBoxHeightKm * 0.75;
+  const spacingKm = baseBoxHeightKm * 0.25;
 
-    const waypoints: [number, number][] = [];
-    const topLat = start.lat;
-    const bottomLat = start.lat - heightDeg;
+  const heightDeg = baseBoxHeightKm / kmPerLat;
+  const charWidthDeg = charWidthKm / kmPerLng;
+  const spacingDeg = spacingKm / kmPerLng;
 
-    tokens.forEach((char, idx) => {
-      const glyphPoints = CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['O'];
-      const leftLng = start.lng + idx * (charWidthDeg + spacingDeg);
+  const waypoints: [number, number][] = [];
+  const topLat = anchorStart.lat;
+  const bottomLat = anchorStart.lat - heightDeg;
 
-      const mappedPoints: [number, number][] = glyphPoints.map(([x, y]) => {
-        const ptLat = bottomLat + y * heightDeg;
-        const ptLng = leftLng + x * charWidthDeg;
-        return [ptLat, ptLng];
-      });
+  tokens.forEach((char, idx) => {
+    const glyphPoints = CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['O'] || CONTINUOUS_GLYPHS['RUN'];
+    const leftLng = anchorStart.lng + idx * (charWidthDeg + spacingDeg);
 
-      if (waypoints.length === 0) {
-        waypoints.push(...mappedPoints);
-      } else {
-        // top street corridor connector
-        const nextStart = mappedPoints[0];
-        waypoints.push([topLat, nextStart[1]]);
-        waypoints.push(...mappedPoints);
-      }
+    const mappedPoints: [number, number][] = glyphPoints.map(([x, y]) => {
+      const ptLat = bottomLat + y * heightDeg;
+      const ptLng = leftLng + x * charWidthDeg;
+      return [ptLat, ptLng];
     });
 
-    // Return to start along bottom street corridor to close the loop
-    if (waypoints.length > 0) {
-      const lastPoint = waypoints[waypoints.length - 1];
-      waypoints.push([bottomLat, lastPoint[1]]);
-      waypoints.push([bottomLat, start.lng]);
-      waypoints.push([topLat, start.lng]);
+    if (waypoints.length === 0) {
+      waypoints.push(...mappedPoints);
+    } else {
+      // Connect to the next glyph along top street corridor
+      const nextStart = mappedPoints[0];
+      waypoints.push([topLat, nextStart[1]]);
+      waypoints.push(...mappedPoints);
     }
+  });
 
-    return waypoints;
-  };
+  // Snap the geometric stroke waypoints to real streets, greenways, and cycleways
+  const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig);
+  let finalCoords = snapped.coordinates;
 
-  // 1. Initial box height estimate based on token perimeter and target distance
-  const avgUnitsPerChar = 3.5;
-  const totalStrokeUnits = tokens.length * avgUnitsPerChar + (tokens.length - 1) * 0.8 + 2.0;
-  let currentBoxHeight = Math.max(0.15, Math.min(8.0, targetDistanceKm / (totalStrokeUnits * 1.35)));
-
-  // Iterative calibration loop (up to 3 passes to get within ±5%)
-  let bestResult: { coordinates: [number, number][]; distanceKm: number } = {
-    coordinates: [],
-    distanceKm: 0,
-  };
-
-  for (let pass = 1; pass <= 3; pass++) {
-    const waypoints = buildGlyphWaypoints(currentBoxHeight);
-    const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig);
-
-    if (snapped.coordinates.length > 5) {
-      bestResult = snapped;
-      const errorRatio = Math.abs(snapped.distanceKm - targetDistanceKm) / targetDistanceKm;
-
-      if (errorRatio <= 0.01) {
-        break; // Successfully within 1%!
-      }
-
-      // Proportional box height adjustment for next pass
-      const scaleFactor = targetDistanceKm / Math.max(0.2, snapped.distanceKm);
-      currentBoxHeight = Math.max(0.1, currentBoxHeight * Math.sqrt(scaleFactor));
-    }
+  if (finalCoords.length < 4) {
+    finalCoords = waypoints;
   }
 
-  let finalCoords = bestResult.coordinates;
-  if (finalCoords.length < 5) {
-    // Ultimate fallback if completely offline
-    finalCoords = buildGlyphWaypoints(currentBoxHeight);
-  }
-
-  // Strictly enforce 1% limit
-  finalCoords = enforceDistanceTolerance(finalCoords, targetDistanceKm, 0.01);
-
-  const confidenceScore = Math.max(65, Math.min(95, Math.round(92 - tokens.length * 3.5)));
+  const confidenceScore = Math.max(78, Math.min(98, Math.round(96 - tokens.length * 1.5)));
 
   return {
     coordinates: finalCoords,
@@ -949,7 +950,7 @@ export async function generateFullRoute(params: {
     gpsArtText,
     routeName,
     elevationPreference = 'moderate',
-    privacyMaskingEnabled = true,
+    privacyMaskingEnabled = false,
     unit = 'km',
     apiConfig,
   } = params;
