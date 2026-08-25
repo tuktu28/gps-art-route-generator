@@ -35,9 +35,7 @@ interface RouteFormProps {
     routeType: RouteType;
     targetDistanceKm: number;
     gpsArtText?: string;
-    routeName?: string;
     elevationPreference: ElevationPreference;
-    privacyMaskingEnabled: boolean;
     unit: DistanceUnit;
   }) => Promise<void>;
   isLoading: boolean;
@@ -55,16 +53,33 @@ const PRESET_CITIES = [
   { name: 'Boulder Trails, Colorado', lat: 40.014986, lng: -105.270546 },
 ];
 
-const GPS_ART_PRESETS = [
-  'RUNNING',
-  '5K',
-  'RUN',
+const GPS_ART_SHAPES = [
   'HEART',
   'STAR',
+  'PACMAN',
+  'TREE',
+  'DIAMOND',
+  'CROWN',
+  'LIGHTNING',
+  'SMILE',
+  'FLOWER',
+  'CAT',
+  'DOG',
+  'HOUSE',
+  'ARROW',
+];
+
+const GPS_ART_WORDS = [
+  'RUN',
+  '5K',
+  '10K',
+  'LOVE',
   'BIKE',
-  'PEACE',
+  'GO',
+  'HI',
   'FAST',
   'TRAIL',
+  'JOY',
 ];
 
 export const RouteForm: React.FC<RouteFormProps> = ({
@@ -85,9 +100,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
   const [routeType, setRouteType] = useState<RouteType>('loop');
   const [gpsArtText, setGpsArtText] = useState<string>('RUNNING');
   const [distanceValue, setDistanceValue] = useState<number>(5.0);
-  const [routeName, setRouteName] = useState<string>('');
   const [elevationPreference] = useState<ElevationPreference>('flat');
-  const [privacyMaskingEnabled, setPrivacyMaskingEnabled] = useState<boolean>(true);
 
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -197,9 +210,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
       routeType,
       targetDistanceKm: distanceInKm,
       gpsArtText: routeType === 'gps_art' ? gpsArtText : undefined,
-      routeName: routeName.trim() || undefined,
       elevationPreference,
-      privacyMaskingEnabled,
       unit,
     });
   };
@@ -388,185 +399,176 @@ export const RouteForm: React.FC<RouteFormProps> = ({
         </div>
       </div>
 
-      {/* 4. CONDITIONAL LOGIC: GPS Art Text Input & Warning */}
+      {/* 4. CONDITIONAL LOGIC: GPS Art Text Input & Controls */}
       {routeType === 'gps_art' ? (
         <div className="p-3.5 rounded-2xl bg-[#8A4A72]/10 dark:bg-[#8A4A72]/20 border border-[#8A4A72]/30 flex flex-col gap-3">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-semibold text-[#8A4A72] dark:text-[#E1B8D4] flex items-center gap-1.5">
-              <Type className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4]" />
-              GPS Art Word / Shape
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-[#8A4A72] dark:text-[#E1B8D4] flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Type className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4]" />
+                GPS Art Character / Shape
+              </span>
+              <span className="text-[10px] text-stone-500 font-mono">Letters A-Z, 0-9 & Shapes</span>
             </label>
             <input
               type="text"
               id="gps-art-text-input"
               value={gpsArtText}
-              onChange={(e) => setGpsArtText(e.target.value.toUpperCase())}
-              placeholder="e.g. RUNNING, 5K, HEART"
-              maxLength={12}
-              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#19201D] border border-[#8A4A72]/40 text-sm font-mono font-bold tracking-wider text-[#8A4A72] dark:text-[#E1B8D4] focus:outline-none focus:border-[#8A4A72] uppercase"
+              onChange={(e) => {
+                // Strictly filter to uppercase letters, numbers, and single spaces
+                const clean = e.target.value.replace(/[^a-zA-Z0-9 ]/g, '').toUpperCase();
+                setGpsArtText(clean);
+              }}
+              placeholder="e.g. HEART, STAR, 5K, RUN"
+              maxLength={14}
+              className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#19201D] border border-[#8A4A72]/40 text-sm font-mono font-bold tracking-wider text-[#8A4A72] dark:text-[#E1B8D4] focus:outline-none focus:border-[#8A4A72] uppercase shadow-xs"
             />
           </div>
 
-          {/* Quick preset glyph words */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] text-[#8A4A72] dark:text-[#E1B8D4] font-medium">Quick Art:</span>
-            {GPS_ART_PRESETS.map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => setGpsArtText(preset)}
-                className={`px-2 py-0.5 rounded-md text-[10px] font-mono border transition-all cursor-pointer ${
-                  gpsArtText === preset
-                    ? 'bg-[#8A4A72] text-white border-[#8A4A72] font-bold'
-                    : 'bg-white/80 dark:bg-[#19201D] text-[#8A4A72] dark:text-[#E1B8D4] border-[#8A4A72]/30 hover:bg-[#8A4A72]/20'
-                }`}
-              >
-                {preset}
-              </button>
-            ))}
+          {/* Quick Preset Shapes */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-[#8A4A72] dark:text-[#E1B8D4] font-semibold">Preset Shapes:</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {GPS_ART_SHAPES.map((shape) => (
+                <button
+                  key={shape}
+                  type="button"
+                  onClick={() => setGpsArtText(shape)}
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-mono border transition-all cursor-pointer ${
+                    gpsArtText === shape
+                      ? 'bg-[#8A4A72] text-white border-[#8A4A72] font-bold shadow-xs'
+                      : 'bg-white/90 dark:bg-[#19201D] text-[#8A4A72] dark:text-[#E1B8D4] border-[#8A4A72]/30 hover:bg-[#8A4A72]/15'
+                  }`}
+                >
+                  {shape}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Explicit Notice */}
+          {/* Quick Preset Words */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-[#8A4A72] dark:text-[#E1B8D4] font-semibold">Preset Words:</span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {GPS_ART_WORDS.map((word) => (
+                <button
+                  key={word}
+                  type="button"
+                  onClick={() => setGpsArtText(word)}
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-mono border transition-all cursor-pointer ${
+                    gpsArtText === word
+                      ? 'bg-[#8A4A72] text-white border-[#8A4A72] font-bold shadow-xs'
+                      : 'bg-white/90 dark:bg-[#19201D] text-[#8A4A72] dark:text-[#E1B8D4] border-[#8A4A72]/30 hover:bg-[#8A4A72]/15'
+                  }`}
+                >
+                  {word}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Smart Alignment & Unrestricted Geometry Note */}
           <div className="p-2.5 rounded-xl bg-[#8A4A72]/15 dark:bg-[#8A4A72]/30 border border-[#8A4A72]/30 text-[11px] text-stone-700 dark:text-stone-300 flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 text-[#C86432] shrink-0 mt-0.5" />
+            <Sparkles className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4] shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong className="text-[#C86432]">Notice:</strong> GPS Art fits strokes to real street grids, strictly avoiding highways and keeping distance within ±1% tolerance.
+              <strong className="text-[#8A4A72] dark:text-[#E1B8D4]">Optimal Placement:</strong> Art starts near your location pin or snaps to the cleanest nearby road intersection for crisp, distortion-free lines without mileage restrictions.
             </p>
           </div>
         </div>
-      ) : null}
-
-      {/* 5. Target Distance: INPUT BOX (No scroll bar / slider) + Stepper & Presets */}
-      <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
-        <div className="flex items-center justify-between">
-          <label htmlFor="target-distance-input" className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-            Target Distance
-          </label>
-          <div className="flex items-center rounded-lg bg-[#F4EFE6] dark:bg-[#121614] p-0.5 border border-[#E5DFD3] dark:border-[#2E3C34]">
-            <button
-              type="button"
-              id="unit-km-btn"
-              onClick={() => onUnitChange('km')}
-              className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
-                unit === 'km' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-              }`}
-            >
-              KM
-            </button>
-            <button
-              type="button"
-              id="unit-mi-btn"
-              onClick={() => onUnitChange('mi')}
-              className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
-                unit === 'mi' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-              }`}
-            >
-              MILES
-            </button>
-          </div>
-        </div>
-
-        {/* Dedicated Numeric Input Box with Steppers */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => adjustDistance(-0.5)}
-            aria-label="Decrease distance"
-            className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <Minus className="w-4 h-4" />
-          </button>
-
-          <div className="relative flex-1">
-            <input
-              type="number"
-              id="target-distance-input"
-              min="0.5"
-              max="150"
-              step="0.1"
-              value={distanceValue}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                if (!isNaN(val)) setDistanceValue(val);
-                else setDistanceValue(0);
-              }}
-              className="w-full text-center py-2 px-3 text-lg font-mono font-bold text-[#2D4F3E] dark:text-[#7EB89B] bg-[#F8F5EE] dark:bg-[#121614] border border-[#E5DFD3] dark:border-[#2E3C34] rounded-xl focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76]"
-            />
-            <span className="absolute right-3 top-2.5 text-xs font-mono font-semibold text-stone-400">
-              {unit}
-            </span>
+      ) : (
+        /* 5. Target Distance: Only shown for standard Loop and Out & Back routes */
+        <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
+          <div className="flex items-center justify-between">
+            <label htmlFor="target-distance-input" className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+              Target Distance
+            </label>
+            <div className="flex items-center rounded-lg bg-[#F4EFE6] dark:bg-[#121614] p-0.5 border border-[#E5DFD3] dark:border-[#2E3C34]">
+              <button
+                type="button"
+                id="unit-km-btn"
+                onClick={() => onUnitChange('km')}
+                className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
+                  unit === 'km' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                }`}
+              >
+                KM
+              </button>
+              <button
+                type="button"
+                id="unit-mi-btn"
+                onClick={() => onUnitChange('mi')}
+                className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
+                  unit === 'mi' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                }`}
+              >
+                MILES
+              </button>
+            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => adjustDistance(0.5)}
-            aria-label="Increase distance"
-            className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Quick Distance Preset Chips */}
-        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-          <span className="text-[10px] text-stone-500 font-medium">Presets:</span>
-          {distancePresets.map((val) => (
+          {/* Dedicated Numeric Input Box with Steppers */}
+          <div className="flex items-center gap-2">
             <button
-              key={val}
               type="button"
-              onClick={() => setDistanceValue(val)}
-              className={`px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors border cursor-pointer ${
-                distanceValue === val
-                  ? 'bg-[#2D4F3E] text-white border-[#2D4F3E] font-semibold'
-                  : 'bg-[#F4EFE6] dark:bg-[#25302A] text-stone-700 dark:text-stone-300 border-[#E5DFD3] dark:border-[#2E3C34] hover:bg-[#EAE4D7] dark:hover:bg-[#324038]'
-              }`}
+              onClick={() => adjustDistance(-0.5)}
+              aria-label="Decrease distance"
+              className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
             >
-              {val} {unit}
+              <Minus className="w-4 h-4" />
             </button>
-          ))}
-        </div>
-      </div>
 
-      {/* 6. Optional Route Name */}
-      <div className="flex flex-col gap-1">
-        <label className="text-[11px] font-medium text-stone-600 dark:text-stone-400">Route Name (Optional)</label>
-        <input
-          type="text"
-          id="route-name-input"
-          value={routeName}
-          onChange={(e) => setRouteName(e.target.value)}
-          placeholder="e.g. Morning Riverway Run"
-          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-stone-800 dark:text-stone-200 placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:border-[#2D4F3E]"
-        />
-      </div>
+            <div className="relative flex-1">
+              <input
+                type="number"
+                id="target-distance-input"
+                min="0.5"
+                max="150"
+                step="0.1"
+                value={distanceValue}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val)) setDistanceValue(val);
+                  else setDistanceValue(0);
+                }}
+                className="w-full text-center py-2 px-3 text-lg font-mono font-bold text-[#2D4F3E] dark:text-[#7EB89B] bg-[#F8F5EE] dark:bg-[#121614] border border-[#E5DFD3] dark:border-[#2E3C34] rounded-xl focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76]"
+              />
+              <span className="absolute right-3 top-2.5 text-xs font-mono font-semibold text-stone-400">
+                {unit}
+              </span>
+            </div>
 
-      {/* 7. Privacy & PostGIS Masking Toggle */}
-      <div className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
-        <div className="flex items-center gap-2">
-          <Shield className={`w-4 h-4 ${privacyMaskingEnabled ? 'text-[#2D4F3E] dark:text-[#7EB89B]' : 'text-stone-400'}`} />
-          <div className="flex flex-col">
-            <span className="text-xs font-semibold text-stone-800 dark:text-stone-200">500m Privacy Masking</span>
-            <span className="text-[10px] text-stone-500 dark:text-stone-400">
-              {distanceValue > (unit === 'km' ? 5 : 3.1)
-                ? '500m start/end truncation (>5km)'
-                : '500m spatial jitter (≤5km)'}
-            </span>
+            <button
+              type="button"
+              onClick={() => adjustDistance(0.5)}
+              aria-label="Increase distance"
+              className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Quick Distance Preset Chips */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+            <span className="text-[10px] text-stone-500 font-medium">Presets:</span>
+            {distancePresets.map((val) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setDistanceValue(val)}
+                className={`px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors border cursor-pointer ${
+                  distanceValue === val
+                    ? 'bg-[#2D4F3E] text-white border-[#2D4F3E] font-semibold'
+                    : 'bg-[#F4EFE6] dark:bg-[#25302A] text-stone-700 dark:text-stone-300 border-[#E5DFD3] dark:border-[#2E3C34] hover:bg-[#EAE4D7] dark:hover:bg-[#324038]'
+                }`}
+              >
+                {val} {unit}
+              </button>
+            ))}
           </div>
         </div>
+      )}
 
-        <label className="relative inline-flex items-center cursor-pointer">
-          <input
-            type="checkbox"
-            id="privacy-masking-checkbox"
-            checked={privacyMaskingEnabled}
-            onChange={(e) => setPrivacyMaskingEnabled(e.target.checked)}
-            className="sr-only peer"
-          />
-          <div className="w-9 h-5 bg-stone-300 dark:bg-stone-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#2D4F3E] dark:peer-checked:bg-[#436E58]"></div>
-        </label>
-      </div>
-
-      {/* 8. Generate Route CTA Button */}
+      {/* Generate Route CTA Button */}
       <button
         type="submit"
         id="generate-route-submit-btn"
