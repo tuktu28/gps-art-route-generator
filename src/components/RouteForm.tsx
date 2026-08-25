@@ -103,6 +103,18 @@ export const RouteForm: React.FC<RouteFormProps> = ({
   const [elevationPreference] = useState<ElevationPreference>('flat');
 
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Sync address if selectedLocation is changed externally (e.g. via map click)
   useEffect(() => {
@@ -164,7 +176,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
     const lat = parseFloat(res.lat);
     const lng = parseFloat(res.lon);
     onLocationChange({ lat, lng }, res.display_name);
-    setAddressQuery(res.display_name.split(',')[0]);
+    setAddressQuery(res.display_name);
     setShowDropdown(false);
   };
 
@@ -227,7 +239,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
       className="flex flex-col gap-4 text-[#1E2A24] dark:text-[#E8EAE6]"
     >
       {/* 1. Address Search / Starting Location */}
-      <div className="relative flex flex-col gap-1.5">
+      <div ref={searchContainerRef} className="relative flex flex-col gap-1.5">
         <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 flex items-center justify-between">
           <span className="flex items-center gap-1.5">
             <MapPin className="w-3.5 h-3.5 text-[#C86432]" />
@@ -248,6 +260,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
             type="text"
             id="address-search-input"
             value={addressQuery}
+            title={addressQuery}
             onChange={(e) => handleAddressInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
             onFocus={() => {

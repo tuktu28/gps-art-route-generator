@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { ActivityType, ElevationPoint, GeneratedRoute, LatLng, RouteType } from '../types/route';
 import { calculateDistanceMeters } from '../lib/routingEngine';
-import { Layers, Maximize2, Minimize2, Navigation, ShieldCheck, ZoomIn, ZoomOut, MapPin } from 'lucide-react';
+import { Layers, Maximize2, Minimize2, Navigation, ZoomIn, ZoomOut, MapPin } from 'lucide-react';
 
 // Helper to linearly interpolate between two hex colors
 function interpolateHexColor(color1: string, color2: string, factor: number): string {
@@ -31,7 +31,6 @@ interface MapProps {
   hoveredElevationPoint: ElevationPoint | null;
   onMapClick?: (latLng: LatLng) => void;
   selectedLocation: LatLng;
-  showPrivacyBuffer?: boolean;
   isDarkMode?: boolean;
 }
 
@@ -74,7 +73,6 @@ export const Map: React.FC<MapProps> = ({
   hoveredElevationPoint,
   onMapClick,
   selectedLocation,
-  showPrivacyBuffer = true,
   isDarkMode = false,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -84,8 +82,6 @@ export const Map: React.FC<MapProps> = ({
   const startMarkerRef = useRef<L.Marker | null>(null);
   const endMarkerRef = useRef<L.Marker | null>(null);
   const hoverMarkerRef = useRef<L.CircleMarker | null>(null);
-  const privacyCircleStartRef = useRef<L.Circle | null>(null);
-  const privacyCircleEndRef = useRef<L.Circle | null>(null);
   const clickMarkerRef = useRef<L.Marker | null>(null);
   const directionalMarkersRef = useRef<L.Marker[]>([]);
 
@@ -215,8 +211,6 @@ export const Map: React.FC<MapProps> = ({
     }
     if (startMarkerRef.current) map.removeLayer(startMarkerRef.current);
     if (endMarkerRef.current) map.removeLayer(endMarkerRef.current);
-    if (privacyCircleStartRef.current) map.removeLayer(privacyCircleStartRef.current);
-    if (privacyCircleEndRef.current) map.removeLayer(privacyCircleEndRef.current);
     directionalMarkersRef.current.forEach((m) => map.removeLayer(m));
     directionalMarkersRef.current = [];
 
@@ -375,43 +369,10 @@ export const Map: React.FC<MapProps> = ({
         );
     }
 
-    // Privacy Buffer Visualizer (500m circle around sensitive origins)
-    if (showPrivacyBuffer && route.privacy.applied) {
-      privacyCircleStartRef.current = L.circle(
-        [route.privacy.originalStart.lat, route.privacy.originalStart.lng],
-        {
-          radius: 500,
-          color: '#5E8271',
-          dashArray: '4, 8',
-          fillColor: '#5E8271',
-          fillOpacity: 0.12,
-          weight: 1.5,
-        }
-      )
-        .addTo(map)
-        .bindPopup(`<div class="text-xs text-stone-700 dark:text-stone-300 font-medium">500m Privacy Protected Zone (Start)</div>`);
-
-      if (route.privacy.originalEnd) {
-        privacyCircleEndRef.current = L.circle(
-          [route.privacy.originalEnd.lat, route.privacy.originalEnd.lng],
-          {
-            radius: 500,
-            color: '#5E8271',
-            dashArray: '4, 8',
-            fillColor: '#5E8271',
-            fillOpacity: 0.12,
-            weight: 1.5,
-          }
-        )
-          .addTo(map)
-          .bindPopup(`<div class="text-xs text-stone-700 dark:text-stone-300 font-medium">500m Privacy Protected Zone (Finish)</div>`);
-      }
-    }
-
     // Smoothly fit map bounds
     const bounds = L.latLngBounds(route.coordinates);
     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
-  }, [route, showPrivacyBuffer]);
+  }, [route]);
 
   // Synchronized Elevation Hover Pin
   useEffect(() => {
