@@ -453,7 +453,7 @@ export const Map: React.FC<MapProps> = ({
             <p class="text-[10px] text-stone-500 mt-0.5">Drag marker to reshape path</p>
             <div class="mt-1.5 pt-1.5 border-t border-stone-200 flex items-center justify-between gap-2">
               <span class="text-[9px] font-mono text-stone-400">${pt[0].toFixed(4)}, ${pt[1].toFixed(4)}</span>
-              ${coords.length > 2 ? `<button onclick="window.__deleteMapWaypoint(${index})" class="px-2 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200 text-[10px] font-bold cursor-pointer">Delete</button>` : ''}
+              ${manualWaypoints.length > 2 ? `<button onclick="window.__deleteMapWaypoint(${index})" class="px-2 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200 text-[10px] font-bold cursor-pointer">Delete</button>` : ''}
             </div>
           </div>`
         );
@@ -631,7 +631,7 @@ export const Map: React.FC<MapProps> = ({
     // Smoothly fit map bounds
     const bounds = L.latLngBounds(route.coordinates);
     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
-  }, [route, isManualMode, isEditMode, manualWaypoints]);
+  }, [route, isManualMode, isEditMode, manualWaypoints, snappedCoordinates, isDarkMode]);
 
   // Synchronized Elevation Hover Pin
   useEffect(() => {
