@@ -37,45 +37,45 @@ export const MasterGuideModal: React.FC<MasterGuideModalProps> = ({ isOpen, onCl
       iconColor: 'text-[#2D4F3E] dark:text-[#7EB89B]',
       bgColor: 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/20',
       description:
-        'Choose Run, Bike, or Hike. Pick from Loop, Curated Scenic (greenways & parks), GPS Art, or Manual Draw mode to click and sketch your own custom path point-by-point.',
+        'Choose Run, Walk, or Road Bike. Select from Loop (circular closed circuit), Point to Point (one-way), Curated Scenic (parks & greenways), or GPS Art (spell words or shapes onto city streets).',
     },
     {
       step: '03',
-      title: 'Generate or Draw Route',
-      icon: Zap,
-      iconColor: 'text-[#8C6838] dark:text-[#DFBD84]',
-      bgColor: 'bg-[#8C6838]/10 dark:bg-[#DFBD84]/20',
-      description:
-        'For automated routes, pick a distance and generate. In Manual Draw mode, click anywhere on the map to drop waypoints, close loops, or drag pins to shape your path.',
-    },
-    {
-      step: '04',
-      title: 'Manually Edit Any Route & Inspect Profile',
+      title: 'Choose Distance & Terrain',
       icon: Mountain,
       iconColor: 'text-[#D98A3C]',
       bgColor: 'bg-[#D98A3C]/10',
       description:
-        'Click "Edit Route" on any generated path to reveal draggable waypoint pins. Adjust corners, insert or delete nodes, reverse direction, or tweak paths directly on the map.',
+        'Pick a target distance using the numeric stepper or instant preset chips (5K, 10K, Half Marathon, Marathon). Adjust elevation preference between flat, rolling, or hilly routes.',
+    },
+    {
+      step: '04',
+      title: 'Generate & Inspect Profile',
+      icon: Zap,
+      iconColor: 'text-[#8C6838] dark:text-[#DFBD84]',
+      bgColor: 'bg-[#8C6838]/10 dark:bg-[#DFBD84]/20',
+      description:
+        'Click "Generate Optimal Route". Preview the live route on the map, and hover across the bottom elevation graph to track elevation gains, highest peaks, and climb profiles in real-time.',
     },
     {
       step: '05',
-      title: 'Export to GPS & Smartwatches',
+      title: 'Export to GPS Devices',
       icon: Download,
       iconColor: 'text-[#2D4F3E] dark:text-[#7EB89B]',
       bgColor: 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/20',
       description:
-        'Download the standard .GPX file to import directly into Garmin Connect, Apple Watch, Strava, Wahoo, COROS, or your favorite outdoor GPS app.',
+        'Download the standard .GPX file to import directly into Garmin Connect, Apple Watch, Strava, Wahoo, COROS, or your favorite outdoor navigation app.',
     },
   ];
 
   const tips = [
     {
-      title: 'Manual Draw & Edit',
-      desc: 'Use "Manual Draw" to plot custom trails point-by-point, or tap "Edit Route" to drag pins on any generated course.',
+      title: 'GPS Art Mode',
+      desc: 'Type any word (e.g., "RUN", "HEART", "DOG") to automatically synthesize path geometries onto matching streets.',
     },
     {
-      title: 'GPS Art Studio',
-      desc: 'Type any word (e.g., "RUN", "HEART", "DOG") to automatically synthesize path geometries onto matching streets.',
+      title: 'Interactive Map Pin',
+      desc: 'Click anywhere on the map at any time to instantly reposition your starting trailhead.',
     },
     {
       title: 'Elevation Sync',

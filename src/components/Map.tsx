@@ -1,31 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import { ActivityType, DistanceUnit, ElevationPoint, GeneratedRoute, LatLng, RouteType } from '../types/route';
-import { calculateDistanceMeters, calculateTotalDistanceKm } from '../lib/routingEngine';
-import {
-  Check,
-  CircleDot,
-  CornerUpLeft,
-  Edit3,
-  Layers,
-  Loader2,
-  Maximize2,
-  Minimize2,
-  MousePointerClick,
-  Navigation,
-  Pencil,
-  RefreshCw,
-  RotateCcw,
-  Route as RouteIcon,
-  Sparkles,
-  Trash2,
-  Undo2,
-  X,
-  ZoomIn,
-  ZoomOut,
-  MapPin,
-} from 'lucide-react';
+import { ActivityType, ElevationPoint, GeneratedRoute, LatLng, RouteType } from '../types/route';
+import { calculateDistanceMeters } from '../lib/routingEngine';
+import { Layers, Maximize2, Minimize2, Navigation, ZoomIn, ZoomOut, MapPin } from 'lucide-react';
 
 // Helper to linearly interpolate between two hex colors
 function interpolateHexColor(color1: string, color2: string, factor: number): string {
@@ -55,60 +32,32 @@ interface MapProps {
   onMapClick?: (latLng: LatLng) => void;
   selectedLocation: LatLng;
   isDarkMode?: boolean;
-  unit?: DistanceUnit;
-  // Manual Draw / Edit Mode Props
-  isManualMode?: boolean;
-  isEditMode?: boolean;
-  manualWaypoints?: [number, number][];
-  snappedCoordinates?: [number, number][];
-  snapToRoads?: boolean;
-  onToggleSnapToRoads?: () => void;
-  isSnapping?: boolean;
-  onManualWaypointsChange?: (waypoints: [number, number][]) => void;
-  onUndoPoint?: () => void;
-  onCloseLoop?: () => void;
-  onClearPoints?: () => void;
-  onSaveManualRoute?: () => void;
-  onSaveEditedRoute?: () => void;
-  onCancelEdit?: () => void;
-  onReverseRoute?: () => void;
 }
 
-type TileLayerKey = 'osm' | 'outdoors' | 'light' | 'dark' | 'satellite' | 'topo';
+type TileLayerKey = 'outdoors' | 'light' | 'dark' | 'satellite' | 'topo';
 
-// Robust, high-speed tile layers with validated URLs and OpenStreetMap fallback
-const TILE_LAYERS: Record<
-  TileLayerKey,
-  { name: string; url: string; fallbackUrl?: string; attribution: string; subdomains?: string[] }
-> = {
-  osm: {
-    name: 'OpenStreetMap (Standard)',
-    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  },
+// Robust, fast, and 403-free tile layers with earthy natural cartography
+const TILE_LAYERS: Record<TileLayerKey, { name: string; url: string; attribution: string; subdomains?: string[] }> = {
   outdoors: {
-    name: 'Natural Outdoors (CARTO)',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-    fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    name: 'Natural Outdoors',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
   light: {
-    name: 'Clean Light (CARTO)',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
-    fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    name: 'Clean Light',
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
   dark: {
-    name: 'Tactical Slate (Dark)',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-    fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    name: 'Tactical Slate',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
   satellite: {
-    name: 'Satellite Imagery',
+    name: 'Satellite View',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: '&copy; Esri, Maxar, Earthstar Geographics',
   },
@@ -125,22 +74,6 @@ export const Map: React.FC<MapProps> = ({
   onMapClick,
   selectedLocation,
   isDarkMode = false,
-  unit = 'mi',
-  isManualMode = false,
-  isEditMode = false,
-  manualWaypoints = [],
-  snappedCoordinates = [],
-  snapToRoads = true,
-  onToggleSnapToRoads,
-  isSnapping = false,
-  onManualWaypointsChange,
-  onUndoPoint,
-  onCloseLoop,
-  onClearPoints,
-  onSaveManualRoute,
-  onSaveEditedRoute,
-  onCancelEdit,
-  onReverseRoute,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -151,31 +84,17 @@ export const Map: React.FC<MapProps> = ({
   const hoverMarkerRef = useRef<L.CircleMarker | null>(null);
   const clickMarkerRef = useRef<L.Marker | null>(null);
   const directionalMarkersRef = useRef<L.Marker[]>([]);
-  const waypointMarkersRef = useRef<L.Marker[]>([]);
 
-  const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'osm');
+  const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'outdoors');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showLayerMenu, setShowLayerMenu] = useState<boolean>(false);
 
-  // Sync default layer with theme changes
+  // Sync default layer with theme changes if user hasn't manually swapped to satellite/topo
   useEffect(() => {
-    if (activeTile === 'dark' || activeTile === 'osm' || activeTile === 'outdoors' || activeTile === 'light') {
-      setActiveTile(isDarkMode ? 'dark' : 'osm');
+    if (activeTile === 'dark' || activeTile === 'outdoors' || activeTile === 'light') {
+      setActiveTile(isDarkMode ? 'dark' : 'outdoors');
     }
   }, [isDarkMode]);
-
-  // Expose global waypoint delete handler for popup buttons
-  useEffect(() => {
-    (window as any).__deleteMapWaypoint = (index: number) => {
-      if (onManualWaypointsChange && manualWaypoints.length > index) {
-        const updated = manualWaypoints.filter((_, i) => i !== index);
-        onManualWaypointsChange(updated);
-      }
-    };
-    return () => {
-      delete (window as any).__deleteMapWaypoint;
-    };
-  }, [manualWaypoints, onManualWaypointsChange]);
 
   // Initialize Map
   useEffect(() => {
@@ -188,104 +107,45 @@ export const Map: React.FC<MapProps> = ({
       attributionControl: true,
     });
 
-    mapInstanceRef.current = map;
-
-    // Initialize tile layer immediately upon map creation
-    const layerConfig = TILE_LAYERS[activeTile] || TILE_LAYERS.osm;
-    const initialLayer = L.tileLayer(layerConfig.url, {
-      attribution: layerConfig.attribution,
-      subdomains: layerConfig.subdomains || ['a', 'b', 'c', 'd'],
+    const initialLayerConfig = TILE_LAYERS[activeTile];
+    const initialLayer = L.tileLayer(initialLayerConfig.url, {
+      attribution: initialLayerConfig.attribution,
+      subdomains: initialLayerConfig.subdomains || ['a', 'b', 'c', 'd'],
       maxZoom: 19,
     }).addTo(map);
-    tileLayerRef.current = initialLayer;
 
-    // ResizeObserver ensures the map tiles constantly fill container without blank gaps
-    const container = mapContainerRef.current;
-    const resizeObserver = new ResizeObserver(() => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.invalidateSize();
+    tileLayerRef.current = initialLayer;
+    mapInstanceRef.current = map;
+
+    // Handle Map Click for Location Selection
+    map.on('click', (e: L.LeafletMouseEvent) => {
+      if (onMapClick) {
+        onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
       }
     });
-    resizeObserver.observe(container);
-
-    const timer1 = setTimeout(() => map.invalidateSize(), 150);
-    const timer2 = setTimeout(() => map.invalidateSize(), 600);
 
     return () => {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-      resizeObserver.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
   }, []);
 
-  // Update Map Click Handler based on Active Mode
+  // Update Tile Layer
   useEffect(() => {
     if (!mapInstanceRef.current) return;
-    const map = mapInstanceRef.current;
-
-    const handleLeafletClick = (e: L.LeafletMouseEvent) => {
-      if (isManualMode || isEditMode) {
-        if (onManualWaypointsChange) {
-          const newPt: [number, number] = [e.latlng.lat, e.latlng.lng];
-          onManualWaypointsChange([...manualWaypoints, newPt]);
-        }
-      } else {
-        if (onMapClick) {
-          onMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
-        }
-      }
-    };
-
-    map.off('click');
-    map.on('click', handleLeafletClick);
-
-    return () => {
-      map.off('click', handleLeafletClick);
-    };
-  }, [isManualMode, isEditMode, manualWaypoints, onManualWaypointsChange, onMapClick]);
-
-  // Update Tile Layer with Fallback & CORS
-  useEffect(() => {
-    if (!mapInstanceRef.current) return;
-    const map = mapInstanceRef.current;
-
     if (tileLayerRef.current) {
-      map.removeLayer(tileLayerRef.current);
-      tileLayerRef.current = null;
+      mapInstanceRef.current.removeLayer(tileLayerRef.current);
     }
-
-    const layerConfig = TILE_LAYERS[activeTile] || TILE_LAYERS.osm;
+    const layerConfig = TILE_LAYERS[activeTile];
     const newLayer = L.tileLayer(layerConfig.url, {
       attribution: layerConfig.attribution,
       subdomains: layerConfig.subdomains || ['a', 'b', 'c', 'd'],
       maxZoom: 19,
-    });
-
-    newLayer.on('tileerror', () => {
-      if (layerConfig.fallbackUrl) {
-        newLayer.setUrl(layerConfig.fallbackUrl);
-      }
-    });
-
-    newLayer.addTo(map);
+    }).addTo(mapInstanceRef.current);
     tileLayerRef.current = newLayer;
-    map.invalidateSize();
   }, [activeTile]);
 
-  // Ensure map layout resizes when entering or exiting manual/edit modes
-  useEffect(() => {
-    if (!mapInstanceRef.current) return;
-    const timer = setTimeout(() => {
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.invalidateSize();
-      }
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [isManualMode, isEditMode]);
-
-  // Update Selected Location Marker (only when not in manual/edit mode)
+  // Update Selected Location Marker (Always active & draggable for seamless re-routing)
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
@@ -293,10 +153,6 @@ export const Map: React.FC<MapProps> = ({
     if (clickMarkerRef.current) {
       map.removeLayer(clickMarkerRef.current);
       clickMarkerRef.current = null;
-    }
-
-    if (isManualMode || isEditMode) {
-      return; // Waypoint markers will handle start/end display in manual/edit modes
     }
 
     const pinHtml = `
@@ -336,183 +192,35 @@ export const Map: React.FC<MapProps> = ({
     });
 
     clickMarkerRef.current = marker;
-  }, [selectedLocation, onMapClick, isManualMode, isEditMode]);
 
-  // Render Route Polyline & Markers (Regular Mode) vs Draggable Waypoint Handles (Manual/Edit Mode)
+    // Pan map to new selected location smoothly
+    map.flyTo([selectedLocation.lat, selectedLocation.lng], Math.max(map.getZoom(), 14), {
+      duration: 0.8,
+    });
+  }, [selectedLocation, onMapClick]);
+
+  // Update Route Polyline and Markers
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
 
-    // Clear previous layers
+    // Clear previous route layers
     if (polylineContainerRef.current) {
       map.removeLayer(polylineContainerRef.current);
       polylineContainerRef.current = null;
     }
-    if (startMarkerRef.current) {
-      map.removeLayer(startMarkerRef.current);
-      startMarkerRef.current = null;
-    }
-    if (endMarkerRef.current) {
-      map.removeLayer(endMarkerRef.current);
-      endMarkerRef.current = null;
-    }
+    if (startMarkerRef.current) map.removeLayer(startMarkerRef.current);
+    if (endMarkerRef.current) map.removeLayer(endMarkerRef.current);
     directionalMarkersRef.current.forEach((m) => map.removeLayer(m));
     directionalMarkersRef.current = [];
-    waypointMarkersRef.current.forEach((m) => map.removeLayer(m));
-    waypointMarkersRef.current = [];
 
-    // ==========================================
-    // CASE A: MANUAL DRAW OR MANUAL EDIT MODE
-    // ==========================================
-    if (isManualMode || isEditMode) {
-      if (!manualWaypoints || manualWaypoints.length === 0) return;
-
-      const layerGroup = L.layerGroup().addTo(map);
-      polylineContainerRef.current = layerGroup;
-
-      // Use snapped road-following coordinates if available, otherwise raw waypoints
-      const roadCoords =
-        snappedCoordinates && snappedCoordinates.length > 1
-          ? snappedCoordinates
-          : manualWaypoints;
-
-      // 1. Base Casing Polyline along snapped roads
-      if (roadCoords.length >= 2) {
-        L.polyline(roadCoords, {
-          color: isDarkMode ? '#0F1512' : '#FFFFFF',
-          weight: 8,
-          opacity: 0.9,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }).addTo(layerGroup);
-
-        // 2. Gradient Polyline along snapped roads
-        const numPoints = roadCoords.length;
-        for (let i = 0; i < numPoints - 1; i++) {
-          const p1 = roadCoords[i];
-          const p2 = roadCoords[i + 1];
-          const progressT = (i + 0.5) / (numPoints - 1);
-          const segColor = getRouteGradientColor(progressT);
-
-          L.polyline([p1, p2], {
-            color: segColor,
-            weight: 5,
-            opacity: 0.98,
-            lineCap: 'round',
-            lineJoin: 'round',
-          }).addTo(layerGroup);
-        }
-      }
-
-      // 3. Draggable Waypoint Markers at control waypoints
-      manualWaypoints.forEach((pt, index) => {
-        const isStart = index === 0;
-        const isEnd = index === manualWaypoints.length - 1 && manualWaypoints.length > 1;
-        const isClosedLoop =
-          manualWaypoints.length > 2 &&
-          calculateDistanceMeters(manualWaypoints[0], manualWaypoints[manualWaypoints.length - 1]) < 35;
-
-        let iconHtml = '';
-        let iconSize: [number, number] = [28, 28];
-        let iconAnchor: [number, number] = [14, 14];
-
-        if (isStart) {
-          iconHtml = `
-            <div class="relative flex items-center justify-center cursor-move">
-              <div class="w-7 h-7 rounded-full bg-[#10B981] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[10px] font-extrabold tracking-tighter ring-2 ring-[#10B981]/50">
-                GO
-              </div>
-            </div>
-          `;
-          iconSize = [32, 32];
-          iconAnchor = [16, 16];
-        } else if (isEnd && isClosedLoop) {
-          iconHtml = `
-            <div class="relative flex items-center justify-center cursor-move">
-              <div class="w-7 h-7 rounded-full bg-[#2D4F3E] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[11px] font-bold ring-2 ring-[#2D4F3E]/50">
-                🔄
-              </div>
-            </div>
-          `;
-          iconSize = [32, 32];
-          iconAnchor = [16, 16];
-        } else if (isEnd) {
-          iconHtml = `
-            <div class="relative flex items-center justify-center cursor-move">
-              <div class="w-7 h-7 rounded-full bg-[#EF4444] border-2 border-white dark:border-[#121614] flex items-center justify-center text-white shadow-xl text-[11px] font-bold ring-2 ring-[#EF4444]/50">
-                🏁
-              </div>
-            </div>
-          `;
-          iconSize = [32, 32];
-          iconAnchor = [16, 16];
-        } else {
-          iconHtml = `
-            <div class="relative flex items-center justify-center cursor-move hover:scale-125 transition-transform">
-              <div class="w-5 h-5 rounded-full bg-white dark:bg-[#1E2723] border-2 border-[#D98A3C] flex items-center justify-center text-[#D98A3C] shadow-md text-[9px] font-mono font-bold">
-                ${index + 1}
-              </div>
-            </div>
-          `;
-          iconSize = [24, 24];
-          iconAnchor = [12, 12];
-        }
-
-        const markerIcon = L.divIcon({
-          className: 'custom-manual-waypoint',
-          html: iconHtml,
-          iconSize,
-          iconAnchor,
-        });
-
-        const waypointMarker = L.marker(pt, {
-          icon: markerIcon,
-          draggable: true,
-          zIndexOffset: isStart || isEnd ? 1200 : 800 + index,
-        }).addTo(map);
-
-        // Waypoint Popup with Quick Controls
-        waypointMarker.bindPopup(
-          `<div class="p-1 font-sans text-stone-800 dark:text-stone-100">
-            <div class="flex items-center gap-1.5 font-bold text-xs text-[#2D4F3E]">
-              <span>Waypoint #${index + 1}</span>
-              ${isStart ? '<span class="px-1.5 py-0.2 bg-[#10B981]/20 text-[#10B981] text-[9px] rounded-sm">START</span>' : ''}
-              ${isEnd ? '<span class="px-1.5 py-0.2 bg-[#EF4444]/20 text-[#EF4444] text-[9px] rounded-sm">FINISH</span>' : ''}
-            </div>
-            <p class="text-[10px] text-stone-500 mt-0.5">Drag marker to reshape path</p>
-            <div class="mt-1.5 pt-1.5 border-t border-stone-200 flex items-center justify-between gap-2">
-              <span class="text-[9px] font-mono text-stone-400">${pt[0].toFixed(4)}, ${pt[1].toFixed(4)}</span>
-              ${manualWaypoints.length > 2 ? `<button onclick="window.__deleteMapWaypoint(${index})" class="px-2 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200 text-[10px] font-bold cursor-pointer">Delete</button>` : ''}
-            </div>
-          </div>`
-        );
-
-        // Draggable event
-        waypointMarker.on('dragend', (e) => {
-          const newPos = (e.target as L.Marker).getLatLng();
-          if (onManualWaypointsChange) {
-            const updated = [...manualWaypoints];
-            updated[index] = [newPos.lat, newPos.lng];
-            onManualWaypointsChange(updated);
-          }
-        });
-
-        waypointMarkersRef.current.push(waypointMarker);
-      });
-
-      return;
-    }
-
-    // ==========================================
-    // CASE B: STANDARD GENERATED ROUTE VIEW
-    // ==========================================
     if (!route || route.coordinates.length === 0) return;
 
     const coords = route.coordinates;
     const layerGroup = L.layerGroup().addTo(map);
     polylineContainerRef.current = layerGroup;
 
-    // 1. Base Casing / Glow polyline
+    // 1. Base Casing / Glow polyline underneath for high contrast on all map tile layers
     L.polyline(coords, {
       color: isDarkMode ? '#0F1512' : '#FFFFFF',
       weight: 8,
@@ -521,7 +229,7 @@ export const Map: React.FC<MapProps> = ({
       lineJoin: 'round',
     }).addTo(layerGroup);
 
-    // 2. Render Gradient Polyline Segments
+    // 2. Render Gradient Polyline Segments from Start (Emerald #10B981) -> Finish (Coral #EF4444)
     const numPoints = coords.length;
     for (let i = 0; i < numPoints - 1; i++) {
       const p1 = coords[i];
@@ -538,7 +246,7 @@ export const Map: React.FC<MapProps> = ({
       }).addTo(layerGroup);
     }
 
-    // 3. Directional Chevron Arrows
+    // 3. Directional Chevron Arrows: Placed every 1/4 mile (402.336 meters) pointing PARALLEL along route
     const QUARTER_MILE_METERS = 402.336;
     const cumulativeDistances: number[] = [0];
     let totalRouteMeters = 0;
@@ -557,10 +265,12 @@ export const Map: React.FC<MapProps> = ({
         targetM += QUARTER_MILE_METERS;
       }
     } else if (totalRouteMeters >= 80) {
+      // Short routes: place 1 midpoint arrow
       targetDistances.push(totalRouteMeters * 0.5);
     }
 
     targetDistances.forEach((targetM) => {
+      // Find segment containing targetM
       let segIndex = 0;
       while (segIndex < cumulativeDistances.length - 1 && cumulativeDistances[segIndex + 1] < targetM) {
         segIndex++;
@@ -576,6 +286,7 @@ export const Map: React.FC<MapProps> = ({
       const interpLat = p1[0] + fraction * (p2[0] - p1[0]);
       const interpLng = p1[1] + fraction * (p2[1] - p1[1]);
 
+      // Calculate bearing from p1 to p2
       const lat1 = (p1[0] * Math.PI) / 180;
       const lat2 = (p2[0] * Math.PI) / 180;
       const dLng = ((p2[1] - p1[1]) * Math.PI) / 180;
@@ -586,6 +297,7 @@ export const Map: React.FC<MapProps> = ({
       const progressRatio = totalRouteMeters > 0 ? targetM / totalRouteMeters : 0.5;
       const arrowColor = getRouteGradientColor(progressRatio);
 
+      // SVG with upward chevron (points="6 15 12 9 18 15"), so rotation by bearing points strictly parallel along the vector
       const arrowIcon = L.divIcon({
         className: 'route-directional-arrow',
         html: `
@@ -605,7 +317,7 @@ export const Map: React.FC<MapProps> = ({
       directionalMarkersRef.current.push(arrowMarker);
     });
 
-    // Start Marker
+    // Start Marker on the route line
     const startCoord = route.coordinates[0];
     const startIcon = L.divIcon({
       className: 'route-start-pin',
@@ -660,7 +372,7 @@ export const Map: React.FC<MapProps> = ({
     // Smoothly fit map bounds
     const bounds = L.latLngBounds(route.coordinates);
     map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
-  }, [route, isManualMode, isEditMode, manualWaypoints, snappedCoordinates, isDarkMode]);
+  }, [route]);
 
   // Synchronized Elevation Hover Pin
   useEffect(() => {
@@ -690,10 +402,7 @@ export const Map: React.FC<MapProps> = ({
   const handleZoomOut = () => mapInstanceRef.current?.zoomOut();
   const handleRecenter = () => {
     if (!mapInstanceRef.current) return;
-    if ((isManualMode || isEditMode) && manualWaypoints.length > 0) {
-      const bounds = L.latLngBounds(manualWaypoints);
-      mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
-    } else if (route && route.coordinates.length > 0) {
+    if (route && route.coordinates.length > 0) {
       const bounds = L.latLngBounds(route.coordinates);
       mapInstanceRef.current.fitBounds(bounds, { padding: [40, 40] });
     } else {
@@ -712,31 +421,15 @@ export const Map: React.FC<MapProps> = ({
     }
   };
 
-  // Manual distance calculation (prioritizing road-snapped geometry)
-  const activeRoadCoords =
-    snappedCoordinates && snappedCoordinates.length > 1
-      ? snappedCoordinates
-      : manualWaypoints;
-  const manualDistKm = activeRoadCoords.length >= 2 ? calculateTotalDistanceKm(activeRoadCoords) : 0;
-  const manualDistDisplay =
-    unit === 'mi'
-      ? `${(manualDistKm * 0.621371).toFixed(2)} mi`
-      : `${manualDistKm.toFixed(2)} km`;
-
   return (
     <div
       id="interactive-map-container"
       className="relative w-full h-full min-h-[440px] rounded-2xl overflow-hidden border border-[#E5DFD3] dark:border-[#28342E] bg-[#F4EFE6] dark:bg-[#121614] shadow-md transition-colors"
     >
       {/* The Leaflet Container */}
-      <div
-        ref={mapContainerRef}
-        className={`w-full h-full min-h-[440px] z-0 ${
-          isManualMode || isEditMode ? 'cursor-crosshair' : 'cursor-default'
-        }`}
-      />
+      <div ref={mapContainerRef} className="w-full h-full min-h-[440px] z-0 cursor-crosshair" />
 
-      {/* Floating Tactical Overlay Controls (Layers, Zoom, Recenter, Fullscreen) */}
+      {/* Floating Tactical Overlay Controls */}
       <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
         {/* Layer Selector */}
         <div className="relative">
@@ -813,204 +506,11 @@ export const Map: React.FC<MapProps> = ({
         </button>
       </div>
 
-      {/* ======================================================== */}
-      {/* FLOATING ACTION TOOLBAR FOR MANUAL DRAW OR EDIT MODES   */}
-      {/* ======================================================== */}
-      {isManualMode && (
-        <div className="absolute top-3.5 left-3.5 right-14 sm:right-auto z-20 flex flex-col gap-2 pointer-events-auto">
-          <div className="p-2.5 sm:p-3 rounded-2xl bg-white/95 dark:bg-[#161D1A]/95 border border-[#2D4F3E]/40 dark:border-[#5C8E76]/40 shadow-xl backdrop-blur-md flex flex-wrap items-center gap-2 text-xs">
-            <div className="flex items-center gap-2 pr-2 border-r border-[#E5DFD3] dark:border-[#2E3C34]">
-              <div className="w-6 h-6 rounded-lg bg-[#2D4F3E] text-white flex items-center justify-center shadow-xs">
-                <Pencil className="w-3.5 h-3.5" />
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-[#2D4F3E] dark:text-[#7EB89B] text-[11px] uppercase tracking-wider">
-                    Manual Draw Mode
-                  </span>
-                  {isSnapping && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#2D4F3E]/15 text-[#2D4F3E] dark:text-[#7EB89B] text-[9px] font-semibold animate-pulse">
-                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                      Snapping...
-                    </span>
-                  )}
-                </div>
-                <span className="text-[10px] text-stone-500 font-mono">
-                  {manualWaypoints.length} pts • {manualDistDisplay}
-                </span>
-              </div>
-            </div>
-
-            {/* Road Snapping Toggle */}
-            {onToggleSnapToRoads && (
-              <button
-                type="button"
-                onClick={onToggleSnapToRoads}
-                title={snapToRoads ? "Road Snapping: ON (Click to draw freehand lines)" : "Road Snapping: OFF (Click to snap to roads & trails)"}
-                className={`px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 font-semibold text-[11px] cursor-pointer transition-all ${
-                  snapToRoads
-                    ? 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/30 text-[#2D4F3E] dark:text-[#7EB89B] border-[#2D4F3E]/40 dark:border-[#5C8E76]/50 shadow-xs'
-                    : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 border-stone-300 dark:border-stone-700'
-                }`}
-              >
-                <RouteIcon className="w-3.5 h-3.5" />
-                <span>Snap to Roads: {snapToRoads ? 'ON' : 'OFF'}</span>
-              </button>
-            )}
-
-            {/* Quick Draw Controls */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                type="button"
-                onClick={onUndoPoint}
-                disabled={manualWaypoints.length === 0}
-                title="Undo last placed point"
-                className="px-2.5 py-1.5 rounded-lg bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#EAE4D7] text-stone-700 dark:text-stone-200 border border-[#E5DFD3] dark:border-[#2E3C34] flex items-center gap-1 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
-              >
-                <Undo2 className="w-3.5 h-3.5 text-[#C86432]" />
-                <span className="hidden sm:inline">Undo</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onCloseLoop}
-                disabled={manualWaypoints.length < 3}
-                title="Snap path back to starting trailhead to close the loop"
-                className="px-2.5 py-1.5 rounded-lg bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#EAE4D7] text-stone-700 dark:text-stone-200 border border-[#E5DFD3] dark:border-[#2E3C34] flex items-center gap-1 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
-              >
-                <CircleDot className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
-                <span>Close Loop</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={onClearPoints}
-                disabled={manualWaypoints.length === 0}
-                title="Clear all manual waypoints"
-                className="px-2 py-1.5 rounded-lg bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-900/30 text-stone-600 dark:text-stone-400 border border-[#E5DFD3] dark:border-[#2E3C34] flex items-center gap-1 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-
-              {onSaveManualRoute && (
-                <button
-                  type="button"
-                  onClick={onSaveManualRoute}
-                  disabled={manualWaypoints.length < 2}
-                  className="px-3 py-1.5 rounded-lg bg-[#2D4F3E] hover:bg-[#233F31] text-white font-bold flex items-center gap-1.5 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-all"
-                >
-                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span>Finish Route</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isEditMode && (
-        <div className="absolute top-3.5 left-3.5 right-14 sm:right-auto z-20 flex flex-col gap-2 pointer-events-auto">
-          <div className="p-2.5 sm:p-3 rounded-2xl bg-white/95 dark:bg-[#161D1A]/95 border border-[#D98A3C]/50 dark:border-[#D98A3C]/50 shadow-xl backdrop-blur-md flex flex-wrap items-center gap-2 text-xs">
-            <div className="flex items-center gap-2 pr-2 border-r border-[#E5DFD3] dark:border-[#2E3C34]">
-              <div className="w-6 h-6 rounded-lg bg-[#D98A3C] text-white flex items-center justify-center shadow-xs">
-                <Edit3 className="w-3.5 h-3.5" />
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="font-bold text-[#D98A3C] text-[11px] uppercase tracking-wider">
-                    Editing Route Pins
-                  </span>
-                  {isSnapping && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#D98A3C]/15 text-[#D98A3C] text-[9px] font-semibold animate-pulse">
-                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                      Snapping...
-                    </span>
-                  )}
-                </div>
-                <span className="text-[10px] text-stone-500 font-mono">
-                  {manualWaypoints.length} nodes • {manualDistDisplay}
-                </span>
-              </div>
-            </div>
-
-            {/* Road Snapping Toggle */}
-            {onToggleSnapToRoads && (
-              <button
-                type="button"
-                onClick={onToggleSnapToRoads}
-                title={snapToRoads ? "Road Snapping: ON" : "Road Snapping: OFF"}
-                className={`px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 font-semibold text-[11px] cursor-pointer transition-all ${
-                  snapToRoads
-                    ? 'bg-[#D98A3C]/15 text-[#D98A3C] border-[#D98A3C]/50 shadow-xs'
-                    : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 border-stone-300 dark:border-stone-700'
-                }`}
-              >
-                <RouteIcon className="w-3.5 h-3.5" />
-                <span>Snap to Roads: {snapToRoads ? 'ON' : 'OFF'}</span>
-              </button>
-            )}
-
-            {/* Quick Edit Controls */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {onReverseRoute && (
-                <button
-                  type="button"
-                  onClick={onReverseRoute}
-                  title="Reverse route direction (swap start & finish)"
-                  className="px-2.5 py-1.5 rounded-lg bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#EAE4D7] text-stone-700 dark:text-stone-200 border border-[#E5DFD3] dark:border-[#2E3C34] flex items-center gap-1 font-medium cursor-pointer transition-colors"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-[#8C6838] dark:text-[#DFBD84]" />
-                  <span className="hidden sm:inline">Reverse</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={onUndoPoint}
-                disabled={manualWaypoints.length <= 2}
-                title="Undo last waypoint"
-                className="px-2.5 py-1.5 rounded-lg bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#EAE4D7] text-stone-700 dark:text-stone-200 border border-[#E5DFD3] dark:border-[#2E3C34] flex items-center gap-1 font-medium disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
-              >
-                <Undo2 className="w-3.5 h-3.5 text-[#C86432]" />
-                <span className="hidden sm:inline">Undo</span>
-              </button>
-
-              {onCancelEdit && (
-                <button
-                  type="button"
-                  onClick={onCancelEdit}
-                  title="Discard edits"
-                  className="px-2.5 py-1.5 rounded-lg bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-stone-200 text-stone-600 dark:text-stone-400 border border-[#E5DFD3] dark:border-[#2E3C34] flex items-center gap-1 font-medium cursor-pointer transition-colors"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  <span>Cancel</span>
-                </button>
-              )}
-
-              {onSaveEditedRoute && (
-                <button
-                  type="button"
-                  onClick={onSaveEditedRoute}
-                  className="px-3.5 py-1.5 rounded-lg bg-[#D98A3C] hover:bg-[#B87129] text-white font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all"
-                >
-                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span>Apply Changes</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Coordinate & Scale HUD (Bottom Left) */}
       <div className="absolute bottom-3 left-4 z-10 pointer-events-none hidden sm:flex items-center gap-3 text-[10px] font-mono text-stone-600 dark:text-stone-400 bg-white/90 dark:bg-[#121614]/90 px-3 py-1 rounded-lg border border-[#E5DFD3] dark:border-[#2E3C34] backdrop-blur-sm shadow-sm">
         <span>LAT: {selectedLocation.lat.toFixed(4)}</span>
         <span>LNG: {selectedLocation.lng.toFixed(4)}</span>
-        {(isManualMode || isEditMode) ? (
-          <span className="text-[#D98A3C] font-semibold">WAYPOINTS: {manualWaypoints.length}</span>
-        ) : (
-          route && <span>PTS: {route.coordinates.length}</span>
-        )}
+        {route && <span>PTS: {route.coordinates.length}</span>}
       </div>
     </div>
   );
