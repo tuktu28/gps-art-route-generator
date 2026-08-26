@@ -73,38 +73,41 @@ interface MapProps {
   onReverseRoute?: () => void;
 }
 
-type TileLayerKey = 'outdoors' | 'osm' | 'light' | 'dark' | 'satellite' | 'topo';
+type TileLayerKey = 'osm' | 'outdoors' | 'light' | 'dark' | 'satellite' | 'topo';
 
-// Robust, high-speed tile layers with validated non-retina URLs
+// Robust, high-speed tile layers with validated URLs and OpenStreetMap fallback
 const TILE_LAYERS: Record<
   TileLayerKey,
-  { name: string; url: string; attribution: string; subdomains?: string[] }
+  { name: string; url: string; fallbackUrl?: string; attribution: string; subdomains?: string[] }
 > = {
+  osm: {
+    name: 'OpenStreetMap (Standard)',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  },
   outdoors: {
     name: 'Natural Outdoors (CARTO)',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
-  osm: {
-    name: 'OpenStreetMap Standard',
-    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
-  },
   light: {
     name: 'Clean Light (CARTO)',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
   dark: {
-    name: 'Tactical Slate (CARTO)',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+    name: 'Tactical Slate (Dark)',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
   satellite: {
-    name: 'Satellite View',
+    name: 'Satellite Imagery',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: '&copy; Esri, Maxar, Earthstar Geographics',
   },
@@ -149,14 +152,14 @@ export const Map: React.FC<MapProps> = ({
   const directionalMarkersRef = useRef<L.Marker[]>([]);
   const waypointMarkersRef = useRef<L.Marker[]>([]);
 
-  const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'outdoors');
+  const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'osm');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showLayerMenu, setShowLayerMenu] = useState<boolean>(false);
 
   // Sync default layer with theme changes
   useEffect(() => {
-    if (activeTile === 'dark' || activeTile === 'outdoors' || activeTile === 'light') {
-      setActiveTile(isDarkMode ? 'dark' : 'outdoors');
+    if (activeTile === 'dark' || activeTile === 'osm' || activeTile === 'outdoors' || activeTile === 'light') {
+      setActiveTile(isDarkMode ? 'dark' : 'osm');
     }
   }, [isDarkMode]);
 
@@ -184,14 +187,6 @@ export const Map: React.FC<MapProps> = ({
       attributionControl: true,
     });
 
-    const initialLayerConfig = TILE_LAYERS[activeTile];
-    const initialLayer = L.tileLayer(initialLayerConfig.url, {
-      attribution: initialLayerConfig.attribution,
-      subdomains: initialLayerConfig.subdomains || ['a', 'b', 'c', 'd'],
-      maxZoom: 19,
-    }).addTo(map);
-
-    tileLayerRef.current = initialLayer;
     mapInstanceRef.current = map;
 
     // ResizeObserver ensures the map tiles constantly fill container without blank gaps
@@ -204,7 +199,7 @@ export const Map: React.FC<MapProps> = ({
     resizeObserver.observe(container);
 
     const timer1 = setTimeout(() => map.invalidateSize(), 150);
-    const timer2 = setTimeout(() => map.invalidateSize(), 500);
+    const timer2 = setTimeout(() => map.invalidateSize(), 600);
 
     return () => {
       clearTimeout(timer1);
@@ -241,20 +236,45 @@ export const Map: React.FC<MapProps> = ({
     };
   }, [isManualMode, isEditMode, manualWaypoints, onManualWaypointsChange, onMapClick]);
 
-  // Update Tile Layer
+  // Update Tile Layer with Fallback & CORS
   useEffect(() => {
     if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
     if (tileLayerRef.current) {
-      mapInstanceRef.current.removeLayer(tileLayerRef.current);
+      map.removeLayer(tileLayerRef.current);
+      tileLayerRef.current = null;
     }
-    const layerConfig = TILE_LAYERS[activeTile];
+
+    const layerConfig = TILE_LAYERS[activeTile] || TILE_LAYERS.osm;
     const newLayer = L.tileLayer(layerConfig.url, {
       attribution: layerConfig.attribution,
       subdomains: layerConfig.subdomains || ['a', 'b', 'c', 'd'],
       maxZoom: 19,
-    }).addTo(mapInstanceRef.current);
+      crossOrigin: true,
+    });
+
+    newLayer.on('tileerror', () => {
+      if (layerConfig.fallbackUrl) {
+        newLayer.setUrl(layerConfig.fallbackUrl);
+      }
+    });
+
+    newLayer.addTo(map);
     tileLayerRef.current = newLayer;
+    map.invalidateSize();
   }, [activeTile]);
+
+  // Ensure map layout resizes when entering or exiting manual/edit modes
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const timer = setTimeout(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [isManualMode, isEditMode]);
 
   // Update Selected Location Marker (only when not in manual/edit mode)
   useEffect(() => {
