@@ -246,19 +246,17 @@ export async function fetchRealRoadPath(
     activity === 'bike'
       ? [
           `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson`,
-          `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson`,
           `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`,
         ]
       : [
           `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson`,
-          `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson`,
-          `https://router.project-osrm.org/route/v1/walking/${coordString}?overview=full&geometries=geojson`,
+          `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`,
         ];
 
   for (const url of osrmEndpoints) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
 
       const response = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
@@ -280,6 +278,70 @@ export async function fetchRealRoadPath(
   }
 
   return null;
+}
+
+// In-memory cache for road segments between two waypoints
+const roadSegmentCache = new Map<string, [number, number][]>();
+
+/**
+ * Snaps a single point-to-point segment onto real streets with in-memory caching
+ */
+export async function snapSegmentBetweenPoints(
+  p1: [number, number],
+  p2: [number, number],
+  activity: ActivityType = 'run',
+  apiConfig?: ApiConfiguration
+): Promise<[number, number][]> {
+  const distM = calculateDistanceMeters(p1, p2);
+  if (distM < 3) return [p1, p2];
+
+  const key = `${activity}_${p1[0].toFixed(5)},${p1[1].toFixed(5)}_${p2[0].toFixed(5)},${p2[1].toFixed(5)}`;
+  if (roadSegmentCache.has(key)) {
+    return roadSegmentCache.get(key)!;
+  }
+
+  const result = await fetchRealRoadPath([p1, p2], activity, apiConfig);
+  if (result && result.coordinates && result.coordinates.length > 0) {
+    roadSegmentCache.set(key, result.coordinates);
+    return result.coordinates;
+  }
+
+  // Fallback direct line if routing service is unreachable
+  return [p1, p2];
+}
+
+/**
+ * Snaps an entire sequence of user waypoints onto real streets, sidewalks, and paths.
+ */
+export async function snapSequenceToRoads(
+  waypoints: [number, number][],
+  activity: ActivityType = 'run',
+  snapToRoads: boolean = true,
+  apiConfig?: ApiConfiguration
+): Promise<{ coordinates: [number, number][]; distanceKm: number }> {
+  if (waypoints.length < 2) {
+    return { coordinates: waypoints, distanceKm: 0 };
+  }
+
+  if (!snapToRoads) {
+    const dist = calculateTotalDistanceKm(waypoints);
+    return { coordinates: waypoints, distanceKm: dist };
+  }
+
+  const fullCoords: [number, number][] = [];
+
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const seg = await snapSegmentBetweenPoints(waypoints[i], waypoints[i + 1], activity, apiConfig);
+    if (fullCoords.length === 0) {
+      fullCoords.push(...seg);
+    } else {
+      // Append without duplicating the junction point
+      fullCoords.push(...seg.slice(1));
+    }
+  }
+
+  const distKm = calculateTotalDistanceKm(fullCoords);
+  return { coordinates: fullCoords, distanceKm: distKm };
 }
 
 /**
@@ -1065,6 +1127,7 @@ export async function generateFullRoute(params: {
  */
 export function buildRouteFromWaypoints(params: {
   coordinates: [number, number][];
+  snappedCoordinates?: [number, number][];
   activity: ActivityType;
   startingAddress?: string;
   routeName?: string;
@@ -1075,6 +1138,7 @@ export function buildRouteFromWaypoints(params: {
 }): GeneratedRoute {
   const {
     coordinates,
+    snappedCoordinates,
     activity,
     startingAddress,
     routeName,
@@ -1084,15 +1148,18 @@ export function buildRouteFromWaypoints(params: {
     existingId,
   } = params;
 
-  if (coordinates.length === 0) {
+  if (coordinates.length === 0 && (!snappedCoordinates || snappedCoordinates.length === 0)) {
     throw new Error('At least one coordinate is required to build a route.');
   }
 
+  // Use snapped road geometry if available, otherwise coordinates
+  const rawCoords = snappedCoordinates && snappedCoordinates.length > 0 ? snappedCoordinates : coordinates;
+
   // If only 1 point, clone it to form minimal 2-point line
   const safeCoords: [number, number][] =
-    coordinates.length === 1
-      ? [coordinates[0], [coordinates[0][0] + 0.0001, coordinates[0][1] + 0.0001]]
-      : coordinates;
+    rawCoords.length === 1
+      ? [rawCoords[0], [rawCoords[0][0] + 0.0001, rawCoords[0][1] + 0.0001]]
+      : rawCoords;
 
   const actualDistanceKm = calculateTotalDistanceKm(safeCoords);
   const eleData = generateElevationProfile(safeCoords, elevationPreference, unit);
@@ -1105,7 +1172,7 @@ export function buildRouteFromWaypoints(params: {
     elevationLossM: eleData.lossM,
     estimatedDurationMinutes: workoutStats.durationMinutes,
     estimatedCalories: workoutStats.calories,
-    turnCount: Math.max(1, safeCoords.length - 1),
+    turnCount: Math.max(1, coordinates.length > 1 ? coordinates.length - 1 : safeCoords.length - 1),
     highestPointM: eleData.highestM,
     lowestPointM: eleData.lowestM,
   };
