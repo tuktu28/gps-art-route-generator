@@ -8,7 +8,7 @@ import {
   LatLng,
   RouteType,
 } from './types/route';
-import { buildRouteFromWaypoints, generateFullRoute } from './lib/routingEngine';
+import { buildRouteFromWaypoints, generateFullRoute, snapSequenceToRoads } from './lib/routingEngine';
 import { downloadGpxFile } from './lib/gpxExporter';
 import { Map } from './components/Map';
 import { ElevationChart } from './components/ElevationChart';
@@ -83,6 +83,54 @@ export default function App() {
   // Manual Draw & Edit States
   const [isEditMode, setIsEditMode] = useState<boolean>(false);
   const [manualWaypoints, setManualWaypoints] = useState<[number, number][]>([]);
+  const [snapToRoads, setSnapToRoads] = useState<boolean>(true);
+  const [snappedCoordinates, setSnappedCoordinates] = useState<[number, number][]>([]);
+  const [isSnapping, setIsSnapping] = useState<boolean>(false);
+
+  const toggleSnapToRoads = () => {
+    setSnapToRoads((prev) => !prev);
+  };
+
+  // Real-time Road Snapping Engine for Manual Draw & Edit Modes
+  useEffect(() => {
+    if (manualWaypoints.length < 2) {
+      setSnappedCoordinates(manualWaypoints);
+      setIsSnapping(false);
+      return;
+    }
+
+    if (!snapToRoads) {
+      setSnappedCoordinates(manualWaypoints);
+      setIsSnapping(false);
+      return;
+    }
+
+    let isMounted = true;
+    setIsSnapping(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const result = await snapSequenceToRoads(
+          manualWaypoints,
+          currentRoute ? currentRoute.activity : 'run',
+          snapToRoads
+        );
+        if (isMounted && result.coordinates.length > 0) {
+          setSnappedCoordinates(result.coordinates);
+        }
+      } catch (err) {
+        console.warn('Road snapping failed, using raw waypoints:', err);
+        if (isMounted) setSnappedCoordinates(manualWaypoints);
+      } finally {
+        if (isMounted) setIsSnapping(false);
+      }
+    }, 120);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [manualWaypoints, snapToRoads, currentRoute?.activity]);
 
   // Elevation Hover Synchronization
   const [hoveredElevationPoint, setHoveredElevationPoint] = useState<ElevationPoint | null>(null);
@@ -166,6 +214,7 @@ export default function App() {
     if (manualWaypoints.length < 2) return;
     const generated = buildRouteFromWaypoints({
       coordinates: manualWaypoints,
+      snappedCoordinates: snappedCoordinates.length > 1 ? snappedCoordinates : manualWaypoints,
       activity: 'run',
       startingAddress: selectedAddress,
       unit,
@@ -187,6 +236,7 @@ export default function App() {
     if (!currentRoute || manualWaypoints.length < 2) return;
     const updated = buildRouteFromWaypoints({
       coordinates: manualWaypoints,
+      snappedCoordinates: snappedCoordinates.length > 1 ? snappedCoordinates : manualWaypoints,
       activity: currentRoute.activity,
       startingAddress: currentRoute.startingAddress,
       routeName: currentRoute.name.includes('(Edited)')
@@ -341,6 +391,10 @@ export default function App() {
               routeType={routeType}
               onRouteChange={handleRouteChange}
               manualWaypoints={manualWaypoints}
+              snappedCoordinates={snappedCoordinates}
+              snapToRoads={snapToRoads}
+              onToggleSnapToRoads={toggleSnapToRoads}
+              isSnapping={isSnapping}
               onUndoManualPoint={handleUndoManualPoint}
               onCloseManualLoop={handleCloseManualLoop}
               onClearManualPoints={handleClearManualPoints}
@@ -399,6 +453,10 @@ export default function App() {
               isManualMode={routeType === 'manual' && !isEditMode}
               isEditMode={isEditMode}
               manualWaypoints={manualWaypoints}
+              snappedCoordinates={snappedCoordinates}
+              snapToRoads={snapToRoads}
+              onToggleSnapToRoads={toggleSnapToRoads}
+              isSnapping={isSnapping}
               onManualWaypointsChange={setManualWaypoints}
               onUndoPoint={handleUndoManualPoint}
               onCloseLoop={handleCloseManualLoop}
