@@ -56,6 +56,10 @@ interface RouteFormProps {
   routeType: RouteType;
   onRouteChange: (type: RouteType) => void;
   manualWaypoints: [number, number][];
+  snappedCoordinates?: [number, number][];
+  snapToRoads?: boolean;
+  onToggleSnapToRoads?: () => void;
+  isSnapping?: boolean;
   onUndoManualPoint: () => void;
   onCloseManualLoop: () => void;
   onClearManualPoints: () => void;
@@ -109,6 +113,10 @@ export const RouteForm: React.FC<RouteFormProps> = ({
   routeType,
   onRouteChange,
   manualWaypoints,
+  snappedCoordinates = [],
+  snapToRoads = true,
+  onToggleSnapToRoads,
+  isSnapping = false,
   onUndoManualPoint,
   onCloseManualLoop,
   onClearManualPoints,
@@ -258,8 +266,12 @@ export const RouteForm: React.FC<RouteFormProps> = ({
     ? [3.1, 5.0, 6.2, 10.0, 13.1, 20.0, 26.2]
     : [5.0, 8.0, 10.0, 15.0, 21.1, 32.2, 42.2];
 
-  // Manual distance display
-  const manualDistKm = manualWaypoints.length >= 2 ? calculateTotalDistanceKm(manualWaypoints) : 0;
+  // Manual distance display (using real road snapped coordinates when available)
+  const activeRoadCoords =
+    snappedCoordinates && snappedCoordinates.length > 1
+      ? snappedCoordinates
+      : manualWaypoints;
+  const manualDistKm = activeRoadCoords.length >= 2 ? calculateTotalDistanceKm(activeRoadCoords) : 0;
   const manualDistFormatted =
     unit === 'mi'
       ? `${(manualDistKm * 0.621371).toFixed(2)} mi`
@@ -451,15 +463,45 @@ export const RouteForm: React.FC<RouteFormProps> = ({
               </div>
               <div className="p-2 rounded-xl bg-white/90 dark:bg-[#19201D]/90 border border-[#E5DFD3] dark:border-[#2E3C34] flex flex-col">
                 <span className="text-[9px] text-stone-500 uppercase">Status</span>
-                <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-                  {manualWaypoints.length === 0
-                    ? 'Click map to start'
-                    : manualWaypoints.length === 1
-                    ? 'Place 2nd point'
-                    : 'Drawing active'}
+                <span className="text-xs font-semibold text-stone-700 dark:text-stone-300 flex items-center gap-1">
+                  {isSnapping ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin text-[#D98A3C]" />
+                      <span>Snapping roads...</span>
+                    </>
+                  ) : manualWaypoints.length === 0 ? (
+                    'Click map to start'
+                  ) : manualWaypoints.length === 1 ? (
+                    'Place 2nd point'
+                  ) : (
+                    'Drawing active'
+                  )}
                 </span>
               </div>
             </div>
+
+            {/* Snap to Roads Toggle Switch */}
+            {onToggleSnapToRoads && (
+              <div className="flex items-center justify-between p-2 rounded-xl bg-white/80 dark:bg-[#19201D]/80 border border-[#D98A3C]/30 text-xs">
+                <div className="flex flex-col">
+                  <span className="font-semibold text-stone-800 dark:text-stone-200 text-[11px]">
+                    Snap to Roads & Trails
+                  </span>
+                  <span className="text-[10px] text-stone-500">
+                    {snapToRoads ? 'Follows real streets & paths' : 'Freehand direct lines'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={onToggleSnapToRoads}
+                  className={`w-11 h-6 rounded-full p-0.5 transition-colors cursor-pointer flex items-center ${
+                    snapToRoads ? 'bg-[#2D4F3E] justify-end' : 'bg-stone-300 dark:bg-stone-700 justify-start'
+                  }`}
+                >
+                  <div className="w-5 h-5 rounded-full bg-white shadow-md transform transition-transform" />
+                </button>
+              </div>
+            )}
 
             {/* In-form Manual Actions */}
             <div className="flex items-center gap-1.5 flex-wrap">

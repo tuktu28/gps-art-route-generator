@@ -8,6 +8,7 @@ import {
   CornerUpLeft,
   Edit3,
   Layers,
+  Loader2,
   Maximize2,
   Minimize2,
   MousePointerClick,
@@ -15,6 +16,8 @@ import {
   Pencil,
   RefreshCw,
   RotateCcw,
+  Route as RouteIcon,
+  Sparkles,
   Trash2,
   Undo2,
   X,
@@ -56,6 +59,10 @@ interface MapProps {
   isManualMode?: boolean;
   isEditMode?: boolean;
   manualWaypoints?: [number, number][];
+  snappedCoordinates?: [number, number][];
+  snapToRoads?: boolean;
+  onToggleSnapToRoads?: () => void;
+  isSnapping?: boolean;
   onManualWaypointsChange?: (waypoints: [number, number][]) => void;
   onUndoPoint?: () => void;
   onCloseLoop?: () => void;
@@ -66,25 +73,33 @@ interface MapProps {
   onReverseRoute?: () => void;
 }
 
-type TileLayerKey = 'outdoors' | 'light' | 'dark' | 'satellite' | 'topo';
+type TileLayerKey = 'outdoors' | 'osm' | 'light' | 'dark' | 'satellite' | 'topo';
 
-// Robust, fast tile layers
-const TILE_LAYERS: Record<TileLayerKey, { name: string; url: string; attribution: string; subdomains?: string[] }> = {
+// Robust, high-speed tile layers with validated non-retina URLs
+const TILE_LAYERS: Record<
+  TileLayerKey,
+  { name: string; url: string; attribution: string; subdomains?: string[] }
+> = {
   outdoors: {
-    name: 'Natural Outdoors',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    name: 'Natural Outdoors (CARTO)',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
+  osm: {
+    name: 'OpenStreetMap Standard',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+  },
   light: {
-    name: 'Clean Light',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    name: 'Clean Light (CARTO)',
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
   dark: {
-    name: 'Tactical Slate',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    name: 'Tactical Slate (CARTO)',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
@@ -110,6 +125,10 @@ export const Map: React.FC<MapProps> = ({
   isManualMode = false,
   isEditMode = false,
   manualWaypoints = [],
+  snappedCoordinates = [],
+  snapToRoads = true,
+  onToggleSnapToRoads,
+  isSnapping = false,
   onManualWaypointsChange,
   onUndoPoint,
   onCloseLoop,
@@ -175,7 +194,22 @@ export const Map: React.FC<MapProps> = ({
     tileLayerRef.current = initialLayer;
     mapInstanceRef.current = map;
 
+    // ResizeObserver ensures the map tiles constantly fill container without blank gaps
+    const container = mapContainerRef.current;
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
+    });
+    resizeObserver.observe(container);
+
+    const timer1 = setTimeout(() => map.invalidateSize(), 150);
+    const timer2 = setTimeout(() => map.invalidateSize(), 500);
+
     return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      resizeObserver.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
@@ -307,11 +341,15 @@ export const Map: React.FC<MapProps> = ({
       const layerGroup = L.layerGroup().addTo(map);
       polylineContainerRef.current = layerGroup;
 
-      const coords = manualWaypoints;
+      // Use snapped road-following coordinates if available, otherwise raw waypoints
+      const roadCoords =
+        snappedCoordinates && snappedCoordinates.length > 1
+          ? snappedCoordinates
+          : manualWaypoints;
 
-      // 1. Base Casing Polyline
-      if (coords.length >= 2) {
-        L.polyline(coords, {
+      // 1. Base Casing Polyline along snapped roads
+      if (roadCoords.length >= 2) {
+        L.polyline(roadCoords, {
           color: isDarkMode ? '#0F1512' : '#FFFFFF',
           weight: 8,
           opacity: 0.9,
@@ -319,11 +357,11 @@ export const Map: React.FC<MapProps> = ({
           lineJoin: 'round',
         }).addTo(layerGroup);
 
-        // 2. Gradient Polyline
-        const numPoints = coords.length;
+        // 2. Gradient Polyline along snapped roads
+        const numPoints = roadCoords.length;
         for (let i = 0; i < numPoints - 1; i++) {
-          const p1 = coords[i];
-          const p2 = coords[i + 1];
+          const p1 = roadCoords[i];
+          const p2 = roadCoords[i + 1];
           const progressT = (i + 0.5) / (numPoints - 1);
           const segColor = getRouteGradientColor(progressT);
 
@@ -337,13 +375,13 @@ export const Map: React.FC<MapProps> = ({
         }
       }
 
-      // 3. Draggable Waypoint Markers along the path
-      coords.forEach((pt, index) => {
+      // 3. Draggable Waypoint Markers at control waypoints
+      manualWaypoints.forEach((pt, index) => {
         const isStart = index === 0;
-        const isEnd = index === coords.length - 1 && coords.length > 1;
+        const isEnd = index === manualWaypoints.length - 1 && manualWaypoints.length > 1;
         const isClosedLoop =
-          coords.length > 2 &&
-          calculateDistanceMeters(coords[0], coords[coords.length - 1]) < 35;
+          manualWaypoints.length > 2 &&
+          calculateDistanceMeters(manualWaypoints[0], manualWaypoints[manualWaypoints.length - 1]) < 35;
 
         let iconHtml = '';
         let iconSize: [number, number] = [28, 28];
@@ -645,8 +683,12 @@ export const Map: React.FC<MapProps> = ({
     }
   };
 
-  // Manual distance calculation
-  const manualDistKm = manualWaypoints.length >= 2 ? calculateTotalDistanceKm(manualWaypoints) : 0;
+  // Manual distance calculation (prioritizing road-snapped geometry)
+  const activeRoadCoords =
+    snappedCoordinates && snappedCoordinates.length > 1
+      ? snappedCoordinates
+      : manualWaypoints;
+  const manualDistKm = activeRoadCoords.length >= 2 ? calculateTotalDistanceKm(activeRoadCoords) : 0;
   const manualDistDisplay =
     unit === 'mi'
       ? `${(manualDistKm * 0.621371).toFixed(2)} mi`
@@ -753,14 +795,39 @@ export const Map: React.FC<MapProps> = ({
                 <Pencil className="w-3.5 h-3.5" />
               </div>
               <div className="flex flex-col">
-                <span className="font-bold text-[#2D4F3E] dark:text-[#7EB89B] text-[11px] uppercase tracking-wider">
-                  Manual Draw Mode
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-[#2D4F3E] dark:text-[#7EB89B] text-[11px] uppercase tracking-wider">
+                    Manual Draw Mode
+                  </span>
+                  {isSnapping && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#2D4F3E]/15 text-[#2D4F3E] dark:text-[#7EB89B] text-[9px] font-semibold animate-pulse">
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                      Snapping...
+                    </span>
+                  )}
+                </div>
                 <span className="text-[10px] text-stone-500 font-mono">
                   {manualWaypoints.length} pts • {manualDistDisplay}
                 </span>
               </div>
             </div>
+
+            {/* Road Snapping Toggle */}
+            {onToggleSnapToRoads && (
+              <button
+                type="button"
+                onClick={onToggleSnapToRoads}
+                title={snapToRoads ? "Road Snapping: ON (Click to draw freehand lines)" : "Road Snapping: OFF (Click to snap to roads & trails)"}
+                className={`px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 font-semibold text-[11px] cursor-pointer transition-all ${
+                  snapToRoads
+                    ? 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/30 text-[#2D4F3E] dark:text-[#7EB89B] border-[#2D4F3E]/40 dark:border-[#5C8E76]/50 shadow-xs'
+                    : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 border-stone-300 dark:border-stone-700'
+                }`}
+              >
+                <RouteIcon className="w-3.5 h-3.5" />
+                <span>Snap to Roads: {snapToRoads ? 'ON' : 'OFF'}</span>
+              </button>
+            )}
 
             {/* Quick Draw Controls */}
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -820,14 +887,39 @@ export const Map: React.FC<MapProps> = ({
                 <Edit3 className="w-3.5 h-3.5" />
               </div>
               <div className="flex flex-col">
-                <span className="font-bold text-[#D98A3C] text-[11px] uppercase tracking-wider">
-                  Editing Route Pins
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-[#D98A3C] text-[11px] uppercase tracking-wider">
+                    Editing Route Pins
+                  </span>
+                  {isSnapping && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-[#D98A3C]/15 text-[#D98A3C] text-[9px] font-semibold animate-pulse">
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                      Snapping...
+                    </span>
+                  )}
+                </div>
                 <span className="text-[10px] text-stone-500 font-mono">
                   {manualWaypoints.length} nodes • {manualDistDisplay}
                 </span>
               </div>
             </div>
+
+            {/* Road Snapping Toggle */}
+            {onToggleSnapToRoads && (
+              <button
+                type="button"
+                onClick={onToggleSnapToRoads}
+                title={snapToRoads ? "Road Snapping: ON" : "Road Snapping: OFF"}
+                className={`px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 font-semibold text-[11px] cursor-pointer transition-all ${
+                  snapToRoads
+                    ? 'bg-[#D98A3C]/15 text-[#D98A3C] border-[#D98A3C]/50 shadow-xs'
+                    : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 border-stone-300 dark:border-stone-700'
+                }`}
+              >
+                <RouteIcon className="w-3.5 h-3.5" />
+                <span>Snap to Roads: {snapToRoads ? 'ON' : 'OFF'}</span>
+              </button>
+            )}
 
             {/* Quick Edit Controls */}
             <div className="flex items-center gap-1.5 flex-wrap">
