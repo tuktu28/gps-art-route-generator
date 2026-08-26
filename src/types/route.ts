@@ -1,5 +1,5 @@
 export type ActivityType = 'run' | 'bike' | 'hike';
-export type RouteType = 'loop' | 'out_and_back' | 'gps_art' | 'manual';
+export type RouteType = 'loop' | 'out_and_back' | 'gps_art';
 export type DistanceUnit = 'km' | 'mi';
 export type ElevationPreference = 'flat' | 'moderate' | 'hilly';
 
