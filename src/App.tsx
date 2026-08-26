@@ -6,8 +6,9 @@ import {
   ElevationPreference,
   GeneratedRoute,
   LatLng,
+  RouteType,
 } from './types/route';
-import { generateFullRoute } from './lib/routingEngine';
+import { buildRouteFromWaypoints, generateFullRoute } from './lib/routingEngine';
 import { downloadGpxFile } from './lib/gpxExporter';
 import { Map } from './components/Map';
 import { ElevationChart } from './components/ElevationChart';
@@ -18,9 +19,11 @@ import {
   BookOpen,
   Clock,
   Download,
+  Edit3,
   Flame,
   Moon,
   Mountain,
+  Pencil,
   Sparkles,
   Sun,
 } from 'lucide-react';
@@ -29,6 +32,17 @@ const DEFAULT_START_LOCATION: LatLng = {
   lat: 40.785091,
   lng: -73.968285, // Central Park, NYC
 };
+
+function extractControlPoints(coords: [number, number][], maxPoints: number = 35): [number, number][] {
+  if (coords.length <= maxPoints) return coords.map((c) => [c[0], c[1]]);
+  const step = (coords.length - 1) / (maxPoints - 1);
+  const result: [number, number][] = [];
+  for (let i = 0; i < maxPoints; i++) {
+    const idx = Math.min(coords.length - 1, Math.round(i * step));
+    result.push([coords[idx][0], coords[idx][1]]);
+  }
+  return result;
+}
 
 export default function App() {
   // Theme state (Light mode / Dark mode)
@@ -59,10 +73,16 @@ export default function App() {
 
   // Application State
   const [currentRoute, setCurrentRoute] = useState<GeneratedRoute | null>(null);
+  const [backupRoute, setBackupRoute] = useState<GeneratedRoute | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<LatLng>(DEFAULT_START_LOCATION);
   const [selectedAddress, setSelectedAddress] = useState<string>('Central Park, NYC');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [unit, setUnit] = useState<DistanceUnit>('mi');
+  const [routeType, setRouteType] = useState<RouteType>('loop');
+
+  // Manual Draw & Edit States
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [manualWaypoints, setManualWaypoints] = useState<[number, number][]>([]);
 
   // Elevation Hover Synchronization
   const [hoveredElevationPoint, setHoveredElevationPoint] = useState<ElevationPoint | null>(null);
@@ -70,18 +90,19 @@ export default function App() {
   // Modals
   const [isGuideModalOpen, setIsGuideModalOpen] = useState<boolean>(false);
 
-  // Generate Route Handler
+  // Generate Route Handler (Automated)
   const handleGenerateRoute = async (params: {
     startLocation: LatLng;
     startingAddress: string;
     activity: ActivityType;
-    routeType: any;
+    routeType: RouteType;
     targetDistanceKm: number;
     gpsArtText?: string;
     elevationPreference: ElevationPreference;
     unit: DistanceUnit;
   }) => {
     setIsLoading(true);
+    setIsEditMode(false);
     try {
       await new Promise((res) => setTimeout(res, 300));
 
@@ -105,10 +126,90 @@ export default function App() {
     }
   };
 
+  // Handle Route Style Selection
+  const handleRouteChange = (type: RouteType) => {
+    setRouteType(type);
+    setIsEditMode(false);
+    if (type === 'manual') {
+      if (manualWaypoints.length === 0) {
+        setManualWaypoints([[selectedLocation.lat, selectedLocation.lng]]);
+      }
+    }
+  };
+
   // Handle map click to set start location
   const handleMapClick = (latLng: LatLng) => {
     setSelectedLocation(latLng);
-    setSelectedAddress(`Pin Location (${latLng.lat.toFixed(4)}, ${latLng.lng.toFixed(4)})`);
+    setSelectedAddress(`Trailhead (${latLng.lat.toFixed(4)}, ${latLng.lng.toFixed(4)})`);
+    if (routeType === 'manual' && manualWaypoints.length === 0) {
+      setManualWaypoints([[latLng.lat, latLng.lng]]);
+    }
+  };
+
+  // Manual Draw Actions
+  const handleUndoManualPoint = () => {
+    setManualWaypoints((prev) => (prev.length > 0 ? prev.slice(0, -1) : []));
+  };
+
+  const handleCloseManualLoop = () => {
+    if (manualWaypoints.length >= 3) {
+      const first = manualWaypoints[0];
+      setManualWaypoints((prev) => [...prev, [first[0], first[1]]]);
+    }
+  };
+
+  const handleClearManualPoints = () => {
+    setManualWaypoints([[selectedLocation.lat, selectedLocation.lng]]);
+  };
+
+  const handleSaveManualRoute = () => {
+    if (manualWaypoints.length < 2) return;
+    const generated = buildRouteFromWaypoints({
+      coordinates: manualWaypoints,
+      activity: 'run',
+      startingAddress: selectedAddress,
+      unit,
+      routeType: 'manual',
+    });
+    setCurrentRoute(generated);
+  };
+
+  // Manual Route Editing Actions
+  const handleStartEditRoute = () => {
+    if (!currentRoute) return;
+    setBackupRoute(currentRoute);
+    const controlPoints = extractControlPoints(currentRoute.coordinates, 32);
+    setManualWaypoints(controlPoints);
+    setIsEditMode(true);
+  };
+
+  const handleSaveEditedRoute = () => {
+    if (!currentRoute || manualWaypoints.length < 2) return;
+    const updated = buildRouteFromWaypoints({
+      coordinates: manualWaypoints,
+      activity: currentRoute.activity,
+      startingAddress: currentRoute.startingAddress,
+      routeName: currentRoute.name.includes('(Edited)')
+        ? currentRoute.name
+        : `${currentRoute.name} (Edited)`,
+      unit,
+      routeType: currentRoute.routeType,
+      existingId: currentRoute.id,
+    });
+    setCurrentRoute(updated);
+    setIsEditMode(false);
+  };
+
+  const handleCancelEdit = () => {
+    if (backupRoute) {
+      setCurrentRoute(backupRoute);
+    }
+    setIsEditMode(false);
+    setManualWaypoints([]);
+  };
+
+  const handleReverseRoute = () => {
+    setManualWaypoints((prev) => [...prev].reverse());
   };
 
   return (
@@ -214,7 +315,15 @@ export default function App() {
 
               <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#2D4F3E] dark:text-[#7EB89B] bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/20 px-2.5 py-1 rounded-full border border-[#2D4F3E]/20">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#2D4F3E] dark:bg-[#7EB89B] animate-pulse" />
-                <span>{isLoading ? 'CALCULATING' : 'READY'}</span>
+                <span>
+                  {isLoading
+                    ? 'CALCULATING'
+                    : isEditMode
+                    ? 'EDITING PINS'
+                    : routeType === 'manual'
+                    ? 'DRAW MODE'
+                    : 'READY'}
+                </span>
               </div>
             </div>
 
@@ -229,6 +338,13 @@ export default function App() {
               }}
               unit={unit}
               onUnitChange={setUnit}
+              routeType={routeType}
+              onRouteChange={handleRouteChange}
+              manualWaypoints={manualWaypoints}
+              onUndoManualPoint={handleUndoManualPoint}
+              onCloseManualLoop={handleCloseManualLoop}
+              onClearManualPoints={handleClearManualPoints}
+              onSaveManualRoute={handleSaveManualRoute}
             />
           </div>
         </aside>
@@ -237,13 +353,17 @@ export default function App() {
         <section className="lg:col-span-8 flex flex-col gap-4 min-w-0">
           {/* Top Leaflet Map Section */}
           <div className="w-full h-[460px] sm:h-[520px] relative rounded-3xl overflow-hidden shadow-sm border border-[#E5DFD3] dark:border-[#2E3C34] group">
-            {/* Floating Map Status Badges matching Screenshot */}
+            {/* Floating Map Status Badges */}
             <div className="absolute top-3.5 left-3.5 z-20 pointer-events-none flex items-center gap-2 flex-wrap">
               <div className="px-3 py-1 rounded-full bg-[#FAF7F2]/95 dark:bg-[#161D1A]/95 border border-[#E5DFD3] dark:border-[#2E3C34] shadow-md backdrop-blur-sm text-[11px] font-mono font-bold text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
                 <span className="text-[#365D48] dark:text-[#7EB89B]">PREVIEW / 01</span>
                 <span className="text-stone-400 dark:text-stone-600">•</span>
                 <span>
-                  {currentRoute
+                  {isEditMode
+                    ? `Editing Route (${manualWaypoints.length} nodes)`
+                    : routeType === 'manual'
+                    ? `Manual Draw (${manualWaypoints.length} pts)`
+                    : currentRoute
                     ? `${unit === 'km' ? currentRoute.stats.distanceKm : currentRoute.stats.distanceMi} ${unit} ${currentRoute.routeType.replace('_', ' ')}`
                     : `Set trailhead & distance`}
                 </span>
@@ -251,10 +371,18 @@ export default function App() {
 
               <div className="px-2.5 py-1 rounded-full bg-[#FAF7F2]/95 dark:bg-[#161D1A]/95 border border-[#E5DFD3] dark:border-[#2E3C34] shadow-md backdrop-blur-sm text-[10px] font-mono text-stone-700 dark:text-stone-300 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#D98A3C]" />
-                <span className="uppercase font-semibold">{currentRoute ? 'ACTIVE ROUTE' : 'DRAG PIN TO MOVE'}</span>
+                <span className="uppercase font-semibold">
+                  {isEditMode
+                    ? 'DRAG PINS TO RESHAPE'
+                    : routeType === 'manual'
+                    ? 'CLICK MAP TO ADD POINTS'
+                    : currentRoute
+                    ? 'ACTIVE ROUTE'
+                    : 'DRAG PIN TO MOVE'}
+                </span>
               </div>
 
-              {currentRoute?.terrainFocus && (
+              {currentRoute?.terrainFocus && !isEditMode && routeType !== 'manual' && (
                 <div className="px-2.5 py-1 rounded-full bg-[#FAF7F2]/95 dark:bg-[#161D1A]/95 border border-[#E5DFD3] dark:border-[#2E3C34] shadow-md backdrop-blur-sm text-[10px] font-mono text-stone-700 dark:text-stone-300 flex items-center gap-1.5">
                   <span className="font-semibold text-[#2D4F3E] dark:text-[#7EB89B]">{currentRoute.terrainFocus}</span>
                 </div>
@@ -267,6 +395,18 @@ export default function App() {
               onMapClick={handleMapClick}
               selectedLocation={selectedLocation}
               isDarkMode={isDarkMode}
+              unit={unit}
+              isManualMode={routeType === 'manual' && !isEditMode}
+              isEditMode={isEditMode}
+              manualWaypoints={manualWaypoints}
+              onManualWaypointsChange={setManualWaypoints}
+              onUndoPoint={handleUndoManualPoint}
+              onCloseLoop={handleCloseManualLoop}
+              onClearPoints={handleClearManualPoints}
+              onSaveManualRoute={handleSaveManualRoute}
+              onSaveEditedRoute={handleSaveEditedRoute}
+              onCancelEdit={handleCancelEdit}
+              onReverseRoute={handleReverseRoute}
             />
           </div>
 
@@ -325,6 +465,26 @@ export default function App() {
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2 w-full sm:w-auto justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-[#E5DFD3] dark:border-[#2E3C34]">
+                {/* Edit Route Button */}
+                {!isEditMode ? (
+                  <button
+                    id="edit-route-btn"
+                    onClick={handleStartEditRoute}
+                    className="px-3.5 py-2 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#EAE4D7] text-stone-800 dark:text-stone-200 border border-[#E5DFD3] dark:border-[#2E3C34] text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-[#D98A3C]" />
+                    <span>Edit Route</span>
+                  </button>
+                ) : (
+                  <button
+                    id="cancel-edit-route-btn"
+                    onClick={handleCancelEdit}
+                    className="px-3 py-2 rounded-xl bg-stone-200 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+
                 {/* Download GPX CTA */}
                 <button
                   id="download-gpx-btn"
