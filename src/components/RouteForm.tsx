@@ -7,23 +7,32 @@ import {
   NominatimResult,
   RouteType,
 } from '../types/route';
+import { calculateTotalDistanceKm } from '../lib/routingEngine';
 import {
   AlertTriangle,
   Bike,
+  Check,
+  CircleDot,
   Compass,
+  CornerUpLeft,
+  Edit3,
   Footprints,
   Info,
   Loader2,
   Locate,
   MapPin,
   Mountain,
+  MousePointerClick,
   Plus,
   Minus,
+  Pencil,
   RefreshCw,
   Search,
   Shield,
   Sparkles,
+  Trash2,
   Type,
+  Undo2,
   Zap,
 } from 'lucide-react';
 
@@ -43,6 +52,14 @@ interface RouteFormProps {
   onLocationChange: (loc: LatLng, address: string) => void;
   unit: DistanceUnit;
   onUnitChange: (unit: DistanceUnit) => void;
+  // Manual route state & actions
+  routeType: RouteType;
+  onRouteChange: (type: RouteType) => void;
+  manualWaypoints: [number, number][];
+  onUndoManualPoint: () => void;
+  onCloseManualLoop: () => void;
+  onClearManualPoints: () => void;
+  onSaveManualRoute: () => void;
 }
 
 const PRESET_CITIES = [
@@ -89,6 +106,13 @@ export const RouteForm: React.FC<RouteFormProps> = ({
   onLocationChange,
   unit,
   onUnitChange,
+  routeType,
+  onRouteChange,
+  manualWaypoints,
+  onUndoManualPoint,
+  onCloseManualLoop,
+  onClearManualPoints,
+  onSaveManualRoute,
 }) => {
   // Form States
   const [addressQuery, setAddressQuery] = useState<string>('Central Park, NYC');
@@ -97,7 +121,6 @@ export const RouteForm: React.FC<RouteFormProps> = ({
   const [showDropdown, setShowDropdown] = useState<boolean>(false);
 
   const [activity, setActivity] = useState<ActivityType>('run');
-  const [routeType, setRouteType] = useState<RouteType>('loop');
   const [gpsArtText, setGpsArtText] = useState<string>('RUNNING');
   const [distanceValue, setDistanceValue] = useState<number>(5.0);
   const [elevationPreference] = useState<ElevationPreference>('flat');
@@ -116,11 +139,10 @@ export const RouteForm: React.FC<RouteFormProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Sync address if selectedLocation is changed externally (e.g. via map click)
+  // Sync address if selectedLocation is changed externally
   useEffect(() => {
-    // When location updates without an explicit addressQuery match
-    if (addressQuery.startsWith('Pin (') || addressQuery.startsWith('GPS (')) {
-      setAddressQuery(`Pin (${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)})`);
+    if (addressQuery.startsWith('Pin (') || addressQuery.startsWith('GPS (') || addressQuery.startsWith('Trailhead (')) {
+      setAddressQuery(`Trailhead (${selectedLocation.lat.toFixed(4)}, ${selectedLocation.lng.toFixed(4)})`);
     }
   }, [selectedLocation]);
 
@@ -148,7 +170,6 @@ export const RouteForm: React.FC<RouteFormProps> = ({
           setSearchResults(data);
           setShowDropdown(true);
 
-          // Auto-center map if exact or high-confidence match is found
           if (data && data.length > 0) {
             const firstLat = parseFloat(data[0].lat);
             const firstLng = parseFloat(data[0].lon);
@@ -213,6 +234,11 @@ export const RouteForm: React.FC<RouteFormProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (routeType === 'manual') {
+      onSaveManualRoute();
+      return;
+    }
+
     const distanceInKm = unit === 'km' ? distanceValue : distanceValue * 1.60934;
 
     await onGenerate({
@@ -227,10 +253,17 @@ export const RouteForm: React.FC<RouteFormProps> = ({
     });
   };
 
-  // Preset Distance Chips (including 20 miles and 26.2 marathon miles)
+  // Preset Distance Chips
   const distancePresets = unit === 'mi'
     ? [3.1, 5.0, 6.2, 10.0, 13.1, 20.0, 26.2]
     : [5.0, 8.0, 10.0, 15.0, 21.1, 32.2, 42.2];
+
+  // Manual distance display
+  const manualDistKm = manualWaypoints.length >= 2 ? calculateTotalDistanceKm(manualWaypoints) : 0;
+  const manualDistFormatted =
+    unit === 'mi'
+      ? `${(manualDistKm * 0.621371).toFixed(2)} mi`
+      : `${manualDistKm.toFixed(2)} km`;
 
   return (
     <form
@@ -241,359 +274,430 @@ export const RouteForm: React.FC<RouteFormProps> = ({
       <div className="flex flex-col gap-4">
         {/* 1. Address Search / Starting Location */}
         <div ref={searchContainerRef} className="relative flex flex-col gap-1.5">
-        <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 flex items-center justify-between">
-          <span className="flex items-center gap-1.5">
-            <MapPin className="w-3.5 h-3.5 text-[#C86432]" />
-            Starting Location
-          </span>
-          <button
-            type="button"
-            onClick={handleGeolocate}
-            id="geolocate-me-btn"
-            className="text-[11px] text-[#2D4F3E] dark:text-[#7EB89B] hover:underline flex items-center gap-1 transition-colors cursor-pointer font-medium"
-          >
-            <Locate className="w-3 h-3 text-[#C86432]" /> Use My GPS
-          </button>
-        </label>
+          <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-[#C86432]" />
+              Starting Location
+            </span>
+            <button
+              type="button"
+              onClick={handleGeolocate}
+              id="geolocate-me-btn"
+              className="text-[11px] text-[#2D4F3E] dark:text-[#7EB89B] hover:underline flex items-center gap-1 transition-colors cursor-pointer font-medium"
+            >
+              <Locate className="w-3 h-3 text-[#C86432]" /> Use My GPS
+            </button>
+          </label>
 
-        <div className="relative">
-          <input
-            type="text"
-            id="address-search-input"
-            value={addressQuery}
-            title={addressQuery}
-            onChange={(e) => handleAddressInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => {
-              if (searchResults.length > 0) setShowDropdown(true);
-            }}
-            placeholder="Search address, park, or click on map..."
-            className="w-full pl-9 pr-8 py-2.5 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-[#1E2A24] dark:text-[#E8EAE6] placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76] focus:ring-1 focus:ring-[#2D4F3E] dark:focus:ring-[#5C8E76] transition-all shadow-sm"
-          />
-          <Search className="w-4 h-4 text-stone-400 dark:text-stone-500 absolute left-3 top-3 pointer-events-none" />
-          {isSearching && (
-            <Loader2 className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B] animate-spin absolute right-3 top-3" />
+          <div className="relative">
+            <input
+              type="text"
+              id="address-search-input"
+              value={addressQuery}
+              title={addressQuery}
+              onChange={(e) => handleAddressInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={() => {
+                if (searchResults.length > 0) setShowDropdown(true);
+              }}
+              placeholder="Search address, park, or click on map..."
+              className="w-full pl-9 pr-8 py-2.5 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] text-xs text-[#1E2A24] dark:text-[#E8EAE6] placeholder-stone-400 dark:placeholder-stone-500 focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76] focus:ring-1 focus:ring-[#2D4F3E] dark:focus:ring-[#5C8E76] transition-all shadow-sm"
+            />
+            <Search className="w-4 h-4 text-stone-400 dark:text-stone-500 absolute left-3 top-3 pointer-events-none" />
+            {isSearching && (
+              <Loader2 className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B] animate-spin absolute right-3 top-3" />
+            )}
+          </div>
+
+          {/* Quick hotspots row */}
+          <div className="flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none">
+            <span className="text-[10px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap">Hotspots:</span>
+            {PRESET_CITIES.map((city) => (
+              <button
+                key={city.name}
+                type="button"
+                onClick={() => handleSelectPreset(city)}
+                className="px-2 py-0.5 rounded-md bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#EAE4D7] dark:hover:bg-[#324038] text-[10px] text-stone-700 dark:text-stone-300 whitespace-nowrap border border-[#E5DFD3] dark:border-[#2E3C34] transition-colors cursor-pointer"
+              >
+                {city.name.split(',')[0]}
+              </button>
+            ))}
+          </div>
+
+          {/* Nominatim Search Dropdown */}
+          {showDropdown && searchResults.length > 0 && (
+            <div className="absolute top-16 left-0 right-0 z-50 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-xl p-1 backdrop-blur-lg flex flex-col gap-0.5 max-h-56 overflow-y-auto">
+              {searchResults.map((res) => (
+                <button
+                  key={res.place_id}
+                  type="button"
+                  onClick={() => handleSelectNominatimResult(res)}
+                  className="w-full text-left px-3 py-2 rounded-lg text-xs text-stone-700 dark:text-stone-200 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A] hover:text-[#2D4F3E] dark:hover:text-[#7EB89B] transition-colors flex items-start gap-2 cursor-pointer"
+                >
+                  <MapPin className="w-3.5 h-3.5 text-stone-400 shrink-0 mt-0.5" />
+                  <span className="truncate">{res.display_name}</span>
+                </button>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* Quick hotspots row */}
-        <div className="flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none">
-          <span className="text-[10px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap">Hotspots:</span>
-          {PRESET_CITIES.map((city) => (
-            <button
-              key={city.name}
-              type="button"
-              onClick={() => handleSelectPreset(city)}
-              className="px-2 py-0.5 rounded-md bg-[#F4EFE6] dark:bg-[#25302A] hover:bg-[#EAE4D7] dark:hover:bg-[#324038] text-[10px] text-stone-700 dark:text-stone-300 whitespace-nowrap border border-[#E5DFD3] dark:border-[#2E3C34] transition-colors cursor-pointer"
-            >
-              {city.name.split(',')[0]}
-            </button>
-          ))}
+        {/* 2. Activity Selector */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Activity Type</label>
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                { id: 'run', label: 'Run', icon: Footprints, color: 'text-[#2D4F3E] dark:text-[#7EB89B]' },
+                { id: 'bike', label: 'Bike', icon: Bike, color: 'text-[#C86432]' },
+                { id: 'hike', label: 'Hike', icon: Mountain, color: 'text-[#8C6838]' },
+              ] as const
+            ).map((item) => {
+              const Icon = item.icon;
+              const isSelected = activity === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  id={`activity-btn-${item.id}`}
+                  onClick={() => setActivity(item.id)}
+                  className={`py-2.5 px-3 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 border-[#2D4F3E] dark:border-[#5C8E76] shadow-sm text-[#2D4F3E] dark:text-[#E8EAE6] font-semibold'
+                      : 'bg-white dark:bg-[#19201D] border-[#E5DFD3] dark:border-[#2E3C34] text-stone-600 dark:text-stone-400 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${isSelected ? item.color : 'text-stone-400'}`} />
+                  <span className="text-xs">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Nominatim Search Dropdown */}
-        {showDropdown && searchResults.length > 0 && (
-          <div className="absolute top-16 left-0 right-0 z-50 rounded-xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-xl p-1 backdrop-blur-lg flex flex-col gap-0.5 max-h-56 overflow-y-auto">
-            {searchResults.map((res) => (
-              <button
-                key={res.place_id}
-                type="button"
-                onClick={() => handleSelectNominatimResult(res)}
-                className="w-full text-left px-3 py-2 rounded-lg text-xs text-stone-700 dark:text-stone-200 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A] hover:text-[#2D4F3E] dark:hover:text-[#7EB89B] transition-colors flex items-start gap-2 cursor-pointer"
-              >
-                <MapPin className="w-3.5 h-3.5 text-stone-400 shrink-0 mt-0.5" />
-                <span className="truncate">{res.display_name}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 2. Activity Selector */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Activity Type</label>
-        <div className="grid grid-cols-3 gap-2">
-          {(
-            [
-              { id: 'run', label: 'Run', icon: Footprints, color: 'text-[#2D4F3E] dark:text-[#7EB89B]' },
-              { id: 'bike', label: 'Bike', icon: Bike, color: 'text-[#C86432]' },
-              { id: 'hike', label: 'Hike', icon: Mountain, color: 'text-[#8C6838]' },
-            ] as const
-          ).map((item) => {
-            const Icon = item.icon;
-            const isSelected = activity === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                id={`activity-btn-${item.id}`}
-                onClick={() => setActivity(item.id)}
-                className={`py-2.5 px-3 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                  isSelected
-                    ? 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 border-[#2D4F3E] dark:border-[#5C8E76] shadow-sm text-[#2D4F3E] dark:text-[#E8EAE6] font-semibold'
-                    : 'bg-white dark:bg-[#19201D] border-[#E5DFD3] dark:border-[#2E3C34] text-stone-600 dark:text-stone-400 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
-                }`}
-              >
-                <Icon className={`w-4 h-4 ${isSelected ? item.color : 'text-stone-400'}`} />
-                <span className="text-xs">{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Activity Terrain Bias Feedback */}
-        {activity === 'run' && (
-          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#2D4F3E]/8 dark:bg-[#3D6B56]/15 border border-[#2D4F3E]/20 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
-            <Footprints className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B] shrink-0 mt-0.5" />
-            <span>
-              <strong className="text-[#2D4F3E] dark:text-[#7EB89B]">Greenbelt & Sidewalk Priority:</strong> Routes bias through greenways, parks, sidewalks, and quiet neighborhood streets while avoiding heavy traffic.
-            </span>
-          </div>
-        )}
-
-        {activity === 'hike' && (
-          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#8C6838]/10 dark:bg-[#8C6838]/20 border border-[#8C6838]/30 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
-            <Mountain className="w-3.5 h-3.5 text-[#8C6838] dark:text-[#DFBD84] shrink-0 mt-0.5" />
-            <span>
-              <strong className="text-[#8C6838] dark:text-[#DFBD84]">Actual Trail Priority:</strong> Routes seek unpaved nature trails, designated hiking footpaths, nature reserve tracks, and singletracks.
-            </span>
-          </div>
-        )}
-
-        {activity === 'bike' && (
-          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#C86432]/10 dark:bg-[#C86432]/20 border border-[#C86432]/30 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
-            <Bike className="w-3.5 h-3.5 text-[#C86432] shrink-0 mt-0.5" />
-            <span>
-              <strong className="text-[#C86432]">Cycleway Priority:</strong> Routes prioritize designated bike lanes, paved greenways, and low-stress bike-friendly roads.
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* 3. Route Type Selector */}
-      <div className="flex flex-col gap-1.5">
-        <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Route Geometry</label>
-        <div className="grid grid-cols-3 gap-2">
-          {(
-            [
-              { id: 'loop', label: 'Loop', icon: RefreshCw },
-              { id: 'out_and_back', label: 'Out & Back', icon: Compass },
-              { id: 'gps_art', label: 'GPS Art', icon: Sparkles },
-            ] as const
-          ).map((item) => {
-            const Icon = item.icon;
-            const isSelected = routeType === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                id={`route-type-btn-${item.id}`}
-                onClick={() => setRouteType(item.id)}
-                className={`py-2.5 px-2 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                  isSelected
-                    ? item.id === 'gps_art'
-                      ? 'bg-[#8A4A72]/10 dark:bg-[#8A4A72]/25 border-[#8A4A72] text-[#8A4A72] dark:text-[#E1B8D4] font-semibold'
-                      : 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 border-[#2D4F3E] dark:border-[#5C8E76] shadow-sm text-[#2D4F3E] dark:text-[#E8EAE6] font-semibold'
-                    : 'bg-white dark:bg-[#19201D] border-[#E5DFD3] dark:border-[#2E3C34] text-stone-600 dark:text-stone-400 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
-                }`}
-              >
-                <Icon
-                  className={`w-4 h-4 ${
+        {/* 3. Route Geometry / Style Selector (Loop, Out & Back, GPS Art, Manual Draw) */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Route Geometry & Style</label>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {(
+              [
+                { id: 'loop', label: 'Loop', icon: RefreshCw },
+                { id: 'out_and_back', label: 'Curated', icon: Compass },
+                { id: 'gps_art', label: 'GPS Art', icon: Sparkles },
+                { id: 'manual', label: 'Manual Draw', icon: Pencil },
+              ] as const
+            ).map((item) => {
+              const Icon = item.icon;
+              const isSelected = routeType === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  id={`route-type-btn-${item.id}`}
+                  onClick={() => onRouteChange(item.id)}
+                  className={`py-2 px-1.5 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
                     isSelected
                       ? item.id === 'gps_art'
-                        ? 'text-[#8A4A72] dark:text-[#E1B8D4]'
-                        : 'text-[#2D4F3E] dark:text-[#7EB89B]'
-                      : 'text-stone-400'
+                        ? 'bg-[#8A4A72]/10 dark:bg-[#8A4A72]/25 border-[#8A4A72] text-[#8A4A72] dark:text-[#E1B8D4] font-semibold'
+                        : item.id === 'manual'
+                        ? 'bg-[#D98A3C]/10 dark:bg-[#D98A3C]/25 border-[#D98A3C] text-[#D98A3C] font-semibold'
+                        : 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 border-[#2D4F3E] dark:border-[#5C8E76] shadow-sm text-[#2D4F3E] dark:text-[#E8EAE6] font-semibold'
+                      : 'bg-white dark:bg-[#19201D] border-[#E5DFD3] dark:border-[#2E3C34] text-stone-600 dark:text-stone-400 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
                   }`}
-                />
-                <span className="text-xs whitespace-nowrap">{item.label}</span>
-              </button>
-            );
-          })}
+                >
+                  <Icon
+                    className={`w-4 h-4 ${
+                      isSelected
+                        ? item.id === 'gps_art'
+                          ? 'text-[#8A4A72] dark:text-[#E1B8D4]'
+                          : item.id === 'manual'
+                          ? 'text-[#D98A3C]'
+                          : 'text-[#2D4F3E] dark:text-[#7EB89B]'
+                        : 'text-stone-400'
+                    }`}
+                  />
+                  <span className="text-[11px] font-medium whitespace-nowrap">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
 
-      {/* 4. CONDITIONAL LOGIC: GPS Art Text Input & Controls */}
-      {routeType === 'gps_art' ? (
-        <div className="p-3.5 rounded-2xl bg-[#8A4A72]/10 dark:bg-[#8A4A72]/20 border border-[#8A4A72]/30 flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-[#8A4A72] dark:text-[#E1B8D4] flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Type className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4]" />
-                GPS Art Character / Shape
+        {/* 4. CONDITIONAL LOGIC BASED ON ROUTE STYLE */}
+        {routeType === 'manual' ? (
+          /* ======================================================== */
+          /* MANUAL DRAW INTERACTIVE CONTROLS                         */
+          /* ======================================================== */
+          <div className="p-3.5 rounded-2xl bg-[#D98A3C]/10 dark:bg-[#D98A3C]/15 border border-[#D98A3C]/30 flex flex-col gap-3 animate-fadeIn">
+            <div className="flex items-center justify-between border-b border-[#D98A3C]/20 pb-2">
+              <div className="flex items-center gap-1.5">
+                <Pencil className="w-3.5 h-3.5 text-[#D98A3C]" />
+                <span className="text-xs font-bold text-[#D98A3C] uppercase tracking-wider">
+                  Interactive Route Drawer
+                </span>
+              </div>
+              <span className="text-[10px] font-mono font-bold bg-[#D98A3C]/20 text-[#8C6838] dark:text-[#DFBD84] px-2 py-0.5 rounded-full">
+                {manualWaypoints.length} {manualWaypoints.length === 1 ? 'Point' : 'Points'}
               </span>
-              <span className="text-[10px] text-stone-500 font-mono">Letters A-Z, 0-9 & Shapes</span>
-            </label>
-            <input
-              type="text"
-              id="gps-art-text-input"
-              value={gpsArtText}
-              onChange={(e) => {
-                // Strictly filter to uppercase letters, numbers, and single spaces
-                const clean = e.target.value.replace(/[^a-zA-Z0-9 ]/g, '').toUpperCase();
-                setGpsArtText(clean);
-              }}
-              placeholder="e.g. HEART, STAR, 5K, RUN"
-              maxLength={14}
-              className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#19201D] border border-[#8A4A72]/40 text-sm font-mono font-bold tracking-wider text-[#8A4A72] dark:text-[#E1B8D4] focus:outline-none focus:border-[#8A4A72] uppercase shadow-xs"
-            />
-          </div>
-
-          {/* Quick Preset Shapes */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] text-[#8A4A72] dark:text-[#E1B8D4] font-semibold">Preset Shapes:</span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {GPS_ART_SHAPES.map((shape) => (
-                <button
-                  key={shape}
-                  type="button"
-                  onClick={() => setGpsArtText(shape)}
-                  className={`px-2 py-0.5 rounded-md text-[10px] font-mono border transition-all cursor-pointer ${
-                    gpsArtText === shape
-                      ? 'bg-[#8A4A72] text-white border-[#8A4A72] font-bold shadow-xs'
-                      : 'bg-white/90 dark:bg-[#19201D] text-[#8A4A72] dark:text-[#E1B8D4] border-[#8A4A72]/30 hover:bg-[#8A4A72]/15'
-                  }`}
-                >
-                  {shape}
-                </button>
-              ))}
             </div>
-          </div>
 
-          {/* Quick Preset Words */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] text-[#8A4A72] dark:text-[#E1B8D4] font-semibold">Preset Words:</span>
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {GPS_ART_WORDS.map((word) => (
-                <button
-                  key={word}
-                  type="button"
-                  onClick={() => setGpsArtText(word)}
-                  className={`px-2 py-0.5 rounded-md text-[10px] font-mono border transition-all cursor-pointer ${
-                    gpsArtText === word
-                      ? 'bg-[#8A4A72] text-white border-[#8A4A72] font-bold shadow-xs'
-                      : 'bg-white/90 dark:bg-[#19201D] text-[#8A4A72] dark:text-[#E1B8D4] border-[#8A4A72]/30 hover:bg-[#8A4A72]/15'
-                  }`}
-                >
-                  {word}
-                </button>
-              ))}
+            {/* Live Stats Preview */}
+            <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+              <div className="p-2 rounded-xl bg-white/90 dark:bg-[#19201D]/90 border border-[#E5DFD3] dark:border-[#2E3C34] flex flex-col">
+                <span className="text-[9px] text-stone-500 uppercase">Live Distance</span>
+                <span className="text-sm font-bold text-[#2D4F3E] dark:text-[#7EB89B]">
+                  {manualDistFormatted}
+                </span>
+              </div>
+              <div className="p-2 rounded-xl bg-white/90 dark:bg-[#19201D]/90 border border-[#E5DFD3] dark:border-[#2E3C34] flex flex-col">
+                <span className="text-[9px] text-stone-500 uppercase">Status</span>
+                <span className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+                  {manualWaypoints.length === 0
+                    ? 'Click map to start'
+                    : manualWaypoints.length === 1
+                    ? 'Place 2nd point'
+                    : 'Drawing active'}
+                </span>
+              </div>
             </div>
-          </div>
 
-          {/* Smart Alignment & Unrestricted Geometry Note */}
-          <div className="p-2.5 rounded-xl bg-[#8A4A72]/15 dark:bg-[#8A4A72]/30 border border-[#8A4A72]/30 text-[11px] text-stone-700 dark:text-stone-300 flex items-start gap-2">
-            <Sparkles className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4] shrink-0 mt-0.5" />
-            <p className="leading-relaxed">
-              <strong className="text-[#8A4A72] dark:text-[#E1B8D4]">Optimal Placement:</strong> Art starts near your location pin or snaps to the cleanest nearby road intersection for crisp, distortion-free lines without mileage restrictions.
-            </p>
-          </div>
-        </div>
-      ) : (
-        /* 5. Target Distance: Only shown for standard Loop and Out & Back routes */
-        <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
-          <div className="flex items-center justify-between">
-            <label htmlFor="target-distance-input" className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-              Target Distance
-            </label>
-            <div className="flex items-center rounded-lg bg-[#F4EFE6] dark:bg-[#121614] p-0.5 border border-[#E5DFD3] dark:border-[#2E3C34]">
+            {/* In-form Manual Actions */}
+            <div className="flex items-center gap-1.5 flex-wrap">
               <button
                 type="button"
-                id="unit-km-btn"
-                onClick={() => onUnitChange('km')}
-                className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
-                  unit === 'km' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-                }`}
+                onClick={onUndoManualPoint}
+                disabled={manualWaypoints.length === 0}
+                className="flex-1 py-1.5 px-2 rounded-lg bg-white dark:bg-[#19201D] hover:bg-[#F4EFE6] text-stone-700 dark:text-stone-300 border border-[#E5DFD3] dark:border-[#2E3C34] text-[11px] font-semibold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
-                KM
+                <Undo2 className="w-3 h-3 text-[#C86432]" />
+                <span>Undo</span>
               </button>
+
               <button
                 type="button"
-                id="unit-mi-btn"
-                onClick={() => onUnitChange('mi')}
-                className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
-                  unit === 'mi' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-                }`}
+                onClick={onCloseManualLoop}
+                disabled={manualWaypoints.length < 3}
+                className="flex-1 py-1.5 px-2 rounded-lg bg-white dark:bg-[#19201D] hover:bg-[#F4EFE6] text-stone-700 dark:text-stone-300 border border-[#E5DFD3] dark:border-[#2E3C34] text-[11px] font-semibold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
-                MILES
+                <CircleDot className="w-3 h-3 text-[#2D4F3E] dark:text-[#7EB89B]" />
+                <span>Close Loop</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onClearManualPoints}
+                disabled={manualWaypoints.length === 0}
+                className="py-1.5 px-2.5 rounded-lg bg-white dark:bg-[#19201D] hover:bg-red-100 hover:text-red-700 text-stone-600 dark:text-stone-400 border border-[#E5DFD3] dark:border-[#2E3C34] text-[11px] font-semibold flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                title="Clear all waypoints"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
+
+            {/* Guidance Tip */}
+            <div className="p-2 rounded-xl bg-white/70 dark:bg-[#19201D]/70 border border-[#D98A3C]/20 text-[11px] text-stone-600 dark:text-stone-300 flex items-start gap-2">
+              <MousePointerClick className="w-3.5 h-3.5 text-[#D98A3C] shrink-0 mt-0.5" />
+              <p className="leading-snug">
+                Click anywhere on the map to add route points. Drag waypoint pins directly on the map to adjust curves.
+              </p>
+            </div>
           </div>
-
-          {/* Dedicated Numeric Input Box with Steppers */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => adjustDistance(-0.5)}
-              aria-label="Decrease distance"
-              className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
-            >
-              <Minus className="w-4 h-4" />
-            </button>
-
-            <div className="relative flex-1">
+        ) : routeType === 'gps_art' ? (
+          /* ======================================================== */
+          /* GPS ART CONTROLS                                         */
+          /* ======================================================== */
+          <div className="p-3.5 rounded-2xl bg-[#8A4A72]/10 dark:bg-[#8A4A72]/20 border border-[#8A4A72]/30 flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-[#8A4A72] dark:text-[#E1B8D4] flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Type className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4]" />
+                  GPS Art Character / Shape
+                </span>
+                <span className="text-[10px] text-stone-500 font-mono">Letters A-Z, 0-9 & Shapes</span>
+              </label>
               <input
-                type="number"
-                id="target-distance-input"
-                min="0.5"
-                max="150"
-                step="0.1"
-                value={distanceValue}
+                type="text"
+                id="gps-art-text-input"
+                value={gpsArtText}
                 onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  if (!isNaN(val)) setDistanceValue(val);
-                  else setDistanceValue(0);
+                  const clean = e.target.value.replace(/[^a-zA-Z0-9 ]/g, '').toUpperCase();
+                  setGpsArtText(clean);
                 }}
-                className="w-full text-center py-2 px-3 text-lg font-mono font-bold text-[#2D4F3E] dark:text-[#7EB89B] bg-[#F8F5EE] dark:bg-[#121614] border border-[#E5DFD3] dark:border-[#2E3C34] rounded-xl focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76]"
+                placeholder="e.g. HEART, STAR, 5K, RUN"
+                maxLength={14}
+                className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#19201D] border border-[#8A4A72]/40 text-sm font-mono font-bold tracking-wider text-[#8A4A72] dark:text-[#E1B8D4] focus:outline-none focus:border-[#8A4A72] uppercase shadow-xs"
               />
-              <span className="absolute right-3 top-2.5 text-xs font-mono font-semibold text-stone-400">
-                {unit}
-              </span>
             </div>
 
-            <button
-              type="button"
-              onClick={() => adjustDistance(0.5)}
-              aria-label="Increase distance"
-              className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
-          </div>
+            {/* Quick Preset Shapes */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] text-[#8A4A72] dark:text-[#E1B8D4] font-semibold">Preset Shapes:</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {GPS_ART_SHAPES.map((shape) => (
+                  <button
+                    key={shape}
+                    type="button"
+                    onClick={() => setGpsArtText(shape)}
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono border transition-all cursor-pointer ${
+                      gpsArtText === shape
+                        ? 'bg-[#8A4A72] text-white border-[#8A4A72] font-bold shadow-xs'
+                        : 'bg-white/90 dark:bg-[#19201D] text-[#8A4A72] dark:text-[#E1B8D4] border-[#8A4A72]/30 hover:bg-[#8A4A72]/15'
+                    }`}
+                  >
+                    {shape}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-          {/* Quick Distance Preset Chips */}
-          <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-            <span className="text-[10px] text-stone-500 font-medium">Presets:</span>
-            {distancePresets.map((val) => (
-              <button
-                key={val}
-                type="button"
-                onClick={() => setDistanceValue(val)}
-                className={`px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors border cursor-pointer ${
-                  distanceValue === val
-                    ? 'bg-[#2D4F3E] text-white border-[#2D4F3E] font-semibold'
-                    : 'bg-[#F4EFE6] dark:bg-[#25302A] text-stone-700 dark:text-stone-300 border-[#E5DFD3] dark:border-[#2E3C34] hover:bg-[#EAE4D7] dark:hover:bg-[#324038]'
-                }`}
-              >
-                {val} {unit}
-              </button>
-            ))}
+            {/* Quick Preset Words */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] text-[#8A4A72] dark:text-[#E1B8D4] font-semibold">Preset Words:</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {GPS_ART_WORDS.map((word) => (
+                  <button
+                    key={word}
+                    type="button"
+                    onClick={() => setGpsArtText(word)}
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-mono border transition-all cursor-pointer ${
+                      gpsArtText === word
+                        ? 'bg-[#8A4A72] text-white border-[#8A4A72] font-bold shadow-xs'
+                        : 'bg-white/90 dark:bg-[#19201D] text-[#8A4A72] dark:text-[#E1B8D4] border-[#8A4A72]/30 hover:bg-[#8A4A72]/15'
+                    }`}
+                  >
+                    {word}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-[#8A4A72]/15 dark:bg-[#8A4A72]/30 border border-[#8A4A72]/30 text-[11px] text-stone-700 dark:text-stone-300 flex items-start gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4] shrink-0 mt-0.5" />
+              <p className="leading-relaxed">
+                <strong className="text-[#8A4A72] dark:text-[#E1B8D4]">Optimal Placement:</strong> Art starts near your location pin or snaps to the cleanest nearby road intersection for crisp lines.
+              </p>
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          /* ======================================================== */
+          /* TARGET DISTANCE CONTROLS (FOR LOOP & CURATED SCENIC)    */
+          /* ======================================================== */
+          <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
+            <div className="flex items-center justify-between">
+              <label htmlFor="target-distance-input" className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+                Target Distance
+              </label>
+              <div className="flex items-center rounded-lg bg-[#F4EFE6] dark:bg-[#121614] p-0.5 border border-[#E5DFD3] dark:border-[#2E3C34]">
+                <button
+                  type="button"
+                  id="unit-km-btn"
+                  onClick={() => onUnitChange('km')}
+                  className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
+                    unit === 'km' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                  }`}
+                >
+                  KM
+                </button>
+                <button
+                  type="button"
+                  id="unit-mi-btn"
+                  onClick={() => onUnitChange('mi')}
+                  className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
+                    unit === 'mi' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                  }`}
+                >
+                  MILES
+                </button>
+              </div>
+            </div>
+
+            {/* Dedicated Numeric Input Box with Steppers */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => adjustDistance(-0.5)}
+                aria-label="Decrease distance"
+                className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+
+              <div className="relative flex-1">
+                <input
+                  type="number"
+                  id="target-distance-input"
+                  min="0.5"
+                  max="150"
+                  step="0.1"
+                  value={distanceValue}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    if (!isNaN(val)) setDistanceValue(val);
+                    else setDistanceValue(0);
+                  }}
+                  className="w-full text-center py-2 px-3 text-lg font-mono font-bold text-[#2D4F3E] dark:text-[#7EB89B] bg-[#F8F5EE] dark:bg-[#121614] border border-[#E5DFD3] dark:border-[#2E3C34] rounded-xl focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76]"
+                />
+                <span className="absolute right-3 top-2.5 text-xs font-mono font-semibold text-stone-400">
+                  {unit}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => adjustDistance(0.5)}
+                aria-label="Increase distance"
+                className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Distance Preset Chips */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              <span className="text-[10px] text-stone-500 font-medium">Presets:</span>
+              {distancePresets.map((val) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setDistanceValue(val)}
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors border cursor-pointer ${
+                    distanceValue === val
+                      ? 'bg-[#2D4F3E] text-white border-[#2D4F3E] font-semibold'
+                      : 'bg-[#F4EFE6] dark:bg-[#25302A] text-stone-700 dark:text-stone-300 border-[#E5DFD3] dark:border-[#2E3C34] hover:bg-[#EAE4D7] dark:hover:bg-[#324038]'
+                  }`}
+                >
+                  {val} {unit}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Generate Route CTA Button */}
+      {/* Generate / Save Route CTA Button */}
       <button
         type="submit"
         id="generate-route-submit-btn"
-        disabled={isLoading}
-        className="w-full mt-auto pt-3.5 pb-3.5 px-4 rounded-xl bg-[#2D4F3E] hover:bg-[#233F31] active:bg-[#1C3328] text-white font-bold text-sm tracking-wide shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        disabled={isLoading || (routeType === 'manual' && manualWaypoints.length < 2)}
+        className={`w-full mt-auto pt-3.5 pb-3.5 px-4 rounded-xl text-white font-bold text-sm tracking-wide shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+          routeType === 'manual'
+            ? 'bg-[#D98A3C] hover:bg-[#B87129] active:bg-[#9B5D1E]'
+            : 'bg-[#2D4F3E] hover:bg-[#233F31] active:bg-[#1C3328]'
+        }`}
       >
         {isLoading ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin text-white" />
             <span>Calculating Real Road Snapping...</span>
+          </>
+        ) : routeType === 'manual' ? (
+          <>
+            <Check className="w-4 h-4 stroke-[2.5]" />
+            <span>
+              {manualWaypoints.length < 2
+                ? 'Click on Map to Place Points (Min 2)'
+                : `Create Custom Route (${manualDistFormatted})`}
+            </span>
           </>
         ) : (
           <>
