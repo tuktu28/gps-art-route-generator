@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { ActivityType, DistanceUnit, ElevationPoint, GeneratedRoute, LatLng, RouteType } from '../types/route';
 import { calculateDistanceMeters, calculateTotalDistanceKm } from '../lib/routingEngine';
 import {
@@ -87,21 +88,21 @@ const TILE_LAYERS: Record<
   },
   outdoors: {
     name: 'Natural Outdoors (CARTO)',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
     fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
   light: {
     name: 'Clean Light (CARTO)',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
     fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
   },
   dark: {
     name: 'Tactical Slate (Dark)',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
     fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
     subdomains: ['a', 'b', 'c', 'd'],
@@ -189,6 +190,15 @@ export const Map: React.FC<MapProps> = ({
 
     mapInstanceRef.current = map;
 
+    // Initialize tile layer immediately upon map creation
+    const layerConfig = TILE_LAYERS[activeTile] || TILE_LAYERS.osm;
+    const initialLayer = L.tileLayer(layerConfig.url, {
+      attribution: layerConfig.attribution,
+      subdomains: layerConfig.subdomains || ['a', 'b', 'c', 'd'],
+      maxZoom: 19,
+    }).addTo(map);
+    tileLayerRef.current = initialLayer;
+
     // ResizeObserver ensures the map tiles constantly fill container without blank gaps
     const container = mapContainerRef.current;
     const resizeObserver = new ResizeObserver(() => {
@@ -251,7 +261,6 @@ export const Map: React.FC<MapProps> = ({
       attribution: layerConfig.attribution,
       subdomains: layerConfig.subdomains || ['a', 'b', 'c', 'd'],
       maxZoom: 19,
-      crossOrigin: true,
     });
 
     newLayer.on('tileerror', () => {
