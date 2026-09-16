@@ -7,57 +7,21 @@ import { ActivityType, LatLng } from '../types/route';
  * Smooth athletic curves, clean baseline transitions, and accurate distance scaling.
  */
 
-// Earth radius in meters
-const EARTH_RADIUS_M = 6371000;
-
-function calculateDistanceMeters(p1: [number, number], p2: [number, number]): number {
-  const lat1 = (p1[0] * Math.PI) / 180;
-  const lat2 = (p2[0] * Math.PI) / 180;
-  const dLat = ((p2[0] - p1[0]) * Math.PI) / 180;
-  const dLng = ((p2[1] - p1[1]) * Math.PI) / 180;
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return EARTH_RADIUS_M * c;
-}
-
 export const CONTINUOUS_GLYPHS: Record<string, [number, number][]> = {
-  // Numbers 0-9 with smooth athletic geometry
+  // Numbers 0-9
   '0': [
-    [0.5, 0.0],
-    [0.32, 0.02],
-    [0.18, 0.08],
-    [0.08, 0.2],
-    [0.02, 0.35],
-    [0.0, 0.5],
-    [0.02, 0.65],
-    [0.08, 0.8],
-    [0.18, 0.92],
-    [0.32, 0.98],
-    [0.5, 1.0],
-    [0.68, 0.98],
-    [0.82, 0.92],
-    [0.92, 0.8],
-    [0.98, 0.65],
-    [1.0, 0.5],
-    [0.98, 0.35],
-    [0.92, 0.2],
-    [0.82, 0.08],
-    [0.68, 0.02],
-    [0.5, 0.0],
+    [0, 0],
+    [0, 1],
+    [1, 1],
+    [1, 0],
+    [0, 0],
   ],
   '1': [
-    [0.2, 0.78],
-    [0.35, 0.92],
-    [0.5, 1.0],
-    [0.5, 0.66],
-    [0.5, 0.33],
-    [0.5, 0.0],
-    [0.2, 0.0],
-    [0.8, 0.0],
+    [0.2, 0.8],
+    [0.5, 1],
+    [0.5, 0],
+    [0.2, 0],
+    [0.8, 0],
   ],
   '2': [
     [0.15, 0.75],
@@ -590,157 +554,41 @@ export const CONTINUOUS_GLYPHS: Record<string, [number, number][]> = {
 
 export const GLYPH_STROKES = CONTINUOUS_GLYPHS;
 
-export interface GpsArtResult {
-  coordinates: [number, number][];
-  confidenceScore: number;
-  totalDistanceKm: number;
-}
-
-/**
- * Generate Master Athletic GPS Art Path
- * - Accurate scale proportional to user target distance
- * - Clean baseline connectors between characters (no random shoots into the sky)
- * - Dense smooth waypoint interpolation for Garmin, Strava & Apple Watch
- * - Starts directly at user pin with "GO" marker
- */
-export function generateGpsArtPath(
-  text: string,
-  start: LatLng,
-  targetDistanceKm: number = 5.0,
-  activity: ActivityType = 'run'
-): GpsArtResult {
-  const clean = text.trim().toUpperCase() || '10';
-  const knownShapes = [
-    'HEART',
-    'STAR',
-    'PACMAN',
-    'TREE',
-    'DIAMOND',
-    'CROWN',
-    'LIGHTNING',
-    'SMILE',
-    'FLOWER',
-    'CAT',
-    'DOG',
-    'HOUSE',
-    'ARROW',
-  ];
-
-  const isSpecialShape = knownShapes.includes(clean);
-  const tokens = isSpecialShape ? [clean] : clean.replace(/[^A-Z0-9 ]/g, '').split('');
-
-  if (tokens.length === 0) {
-    tokens.push('1', '0');
-  }
-
-  const charWidth = isSpecialShape ? 1.0 : 0.72;
-  const spacing = isSpecialShape ? 0.0 : 0.22;
-
-  const unitPath: [number, number][] = [];
-
-  tokens.forEach((char, index) => {
-    const glyphPoints =
-      CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['0'] || CONTINUOUS_GLYPHS['O'];
-    const charOffset = index * (charWidth + spacing);
-
-    const mapped = glyphPoints.map(([x, y]) => [charOffset + x * charWidth, y] as [number, number]);
-
-    if (unitPath.length === 0) {
-      unitPath.push(...mapped);
-    } else {
-      const lastPt = unitPath[unitPath.length - 1];
-      const nextPt = mapped[0];
-
-      // Smooth horizontal baseline connection between consecutive characters
-      if (lastPt[1] <= 0.35 && nextPt[1] <= 0.35) {
-        unitPath.push([lastPt[0], 0.0]);
-        unitPath.push([nextPt[0], 0.0]);
-      }
-      unitPath.push(...mapped);
-    }
-  });
-
-  // Calculate total unit path length
-  let unitLength = 0;
-  for (let i = 0; i < unitPath.length - 1; i++) {
-    const dx = unitPath[i + 1][0] - unitPath[i][0];
-    const dy = unitPath[i + 1][1] - unitPath[i][1];
-    unitLength += Math.hypot(dx, dy);
-  }
-  unitLength = Math.max(0.5, unitLength);
-
-  // Compute bounding box scale in kilometers to match target distance
-  const desiredKm = Math.max(0.5, Math.min(100.0, targetDistanceKm || (activity === 'bike' ? 10.0 : 5.0)));
-  let boxHeightKm = desiredKm / unitLength;
-  boxHeightKm = Math.max(0.12, Math.min(15.0, boxHeightKm));
-
-  const latRad = (start.lat * Math.PI) / 180;
-  const kmPerLat = 111.0;
-  const kmPerLng = 111.0 * Math.cos(latRad);
-
-  const heightDeg = boxHeightKm / kmPerLat;
-  const widthDeg = boxHeightKm / kmPerLng;
-
-  // Anchor the artwork so that the first point is EXACTLY at startLocation
-  const firstX = unitPath[0][0];
-  const firstY = unitPath[0][1];
-
-  const originLat = start.lat - firstY * heightDeg;
-  const originLng = start.lng - firstX * widthDeg;
-
-  const rawGeoCoords: [number, number][] = unitPath.map(([uX, uY]) => [
-    originLat + uY * heightDeg,
-    originLng + uX * widthDeg,
-  ]);
-
-  // Dense Waypoint Interpolation:
-  // Inserts smooth sub-points every ~15 meters so GPS devices track curves cleanly
-  const denseCoords: [number, number][] = [rawGeoCoords[0]];
-  for (let i = 0; i < rawGeoCoords.length - 1; i++) {
-    const p1 = rawGeoCoords[i];
-    const p2 = rawGeoCoords[i + 1];
-    const distM = calculateDistanceMeters(p1, p2);
-
-    if (distM > 20) {
-      const steps = Math.ceil(distM / 15);
-      for (let s = 1; s < steps; s++) {
-        const fraction = s / steps;
-        denseCoords.push([
-          p1[0] + (p2[0] - p1[0]) * fraction,
-          p1[1] + (p2[1] - p1[1]) * fraction,
-        ]);
-      }
-    }
-    denseCoords.push(p2);
-  }
-
-  // Calculate final distance
-  let finalMeters = 0;
-  for (let i = 0; i < denseCoords.length - 1; i++) {
-    finalMeters += calculateDistanceMeters(denseCoords[i], denseCoords[i + 1]);
-  }
-  const totalDistanceKm = Number((finalMeters / 1000).toFixed(2));
-
-  const confidenceScore = Math.max(88, Math.min(99, Math.round(98 - tokens.length * 0.8)));
-
-  return {
-    coordinates: denseCoords,
-    confidenceScore,
-    totalDistanceKm,
-  };
-}
-
-/**
- * Legacy wrapper for backward compatibility
- */
 export function generateGlyphPolyline(
   text: string,
   start: LatLng,
   scaleMeters: number = 500
 ): { coordinates: [number, number][]; confidenceScore: number } {
-  const result = generateGpsArtPath(text, start, (scaleMeters / 1000) * 4);
+  const clean = text.trim().toUpperCase() || 'RUN';
+  const tokens = clean.split('');
+  const charWidth = 1.0;
+  const spacing = 0.3;
+
+  const latRad = (start.lat * Math.PI) / 180;
+  const kmPerLat = 111.0;
+  const kmPerLng = 111.0 * Math.cos(latRad);
+
+  const heightKm = scaleMeters / 1000;
+  const widthKm = heightKm;
+
+  const heightDeg = heightKm / kmPerLat;
+  const widthDeg = widthKm / kmPerLng;
+
+  const waypoints: [number, number][] = [];
+
+  tokens.forEach((char, index) => {
+    const glyph = CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['0'] || [[0, 0], [1, 1]];
+    const xOffset = index * (charWidth + spacing);
+
+    glyph.forEach(([x, y]) => {
+      const lat = start.lat + (y - 0.5) * heightDeg;
+      const lng = start.lng + (xOffset + x - (tokens.length * (charWidth + spacing)) / 2) * widthDeg;
+      waypoints.push([lat, lng]);
+    });
+  });
+
   return {
-    coordinates: result.coordinates,
-    confidenceScore: result.confidenceScore,
+    coordinates: waypoints,
+    confidenceScore: Math.round(90 - tokens.length * 2),
   };
 }
