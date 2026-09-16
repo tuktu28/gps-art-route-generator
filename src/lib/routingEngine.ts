@@ -10,7 +10,7 @@ import {
   RouteStats,
   RouteType,
 } from '../types/route';
-import { CONTINUOUS_GLYPHS, GLYPH_STROKES } from './glyphEngine';
+import { CONTINUOUS_GLYPHS, GLYPH_STROKES, generateGpsArtPath } from './glyphEngine';
 
 // Earth radius in meters
 const EARTH_RADIUS_M = 6371000;
@@ -485,9 +485,9 @@ export function enforceDistanceTolerance(
 }
 
 /**
- * Generate authentic road-snapped GPS Art:
- * Starts ideally at or near the location marker, optimizing the starting/ending anchor
- * to the best nearby road intersection for clean, crisp, distortion-free art lines.
+ * Generate authentic athletic GPS Art:
+ * Starts directly at the user's location pin with smooth, rounded single-stroke geometry.
+ * Accurately scaled to target workout distance without erratic street-snapping distortions.
  */
 export async function generateRoadGpsArtRoute(
   start: LatLng,
@@ -496,101 +496,12 @@ export async function generateRoadGpsArtRoute(
   activity: ActivityType,
   apiConfig?: ApiConfiguration
 ): Promise<{ coordinates: [number, number][]; confidenceScore: number }> {
-  const clean = text.trim().toUpperCase() || 'RUN';
-  const knownShapes = [
-    'HEART',
-    'STAR',
-    'PACMAN',
-    'TREE',
-    'DIAMOND',
-    'CROWN',
-    'LIGHTNING',
-    'SMILE',
-    'FLOWER',
-    'CAT',
-    'DOG',
-    'HOUSE',
-    'ARROW',
-  ];
-  const isSpecialShape = knownShapes.includes(clean);
-  const tokens = isSpecialShape ? [clean] : clean.replace(/[^A-Z0-9 ]/g, '').split('');
-  if (tokens.length === 0) tokens.push('R', 'U', 'N');
-
-  // Discover nearby street intersections/nodes within 350m to anchor the art cleanly
-  const nearbyCorridors = await discoverCorridorNodes(start, 0.35, activity);
-  let anchorStart = { ...start };
-
-  if (nearbyCorridors.length > 0) {
-    let closestNode = nearbyCorridors[0];
-    let minD = calculateDistanceMeters([start.lat, start.lng], [closestNode.lat, closestNode.lng]);
-
-    for (let i = 1; i < nearbyCorridors.length; i++) {
-      const d = calculateDistanceMeters(
-        [start.lat, start.lng],
-        [nearbyCorridors[i].lat, nearbyCorridors[i].lng]
-      );
-      if (d < minD && d >= 20) {
-        minD = d;
-        closestNode = nearbyCorridors[i];
-      }
-    }
-
-    // If an optimal road intersection was found within 350m, anchor the art start there
-    if (minD <= 350) {
-      anchorStart = { lat: closestNode.lat, lng: closestNode.lng };
-    }
-  }
-
-  const latRad = (anchorStart.lat * Math.PI) / 180;
-  const kmPerLat = 111.0;
-  const kmPerLng = 111.0 * Math.cos(latRad);
-
-  // Determine natural readable scale without arbitrary user restrictions
-  const baseBoxHeightKm = activity === 'bike' ? 0.75 : activity === 'hike' ? 0.35 : 0.45;
-  const charWidthKm = isSpecialShape ? baseBoxHeightKm * 1.15 : baseBoxHeightKm * 0.75;
-  const spacingKm = baseBoxHeightKm * 0.25;
-
-  const heightDeg = baseBoxHeightKm / kmPerLat;
-  const charWidthDeg = charWidthKm / kmPerLng;
-  const spacingDeg = spacingKm / kmPerLng;
-
-  const waypoints: [number, number][] = [];
-  const topLat = anchorStart.lat;
-  const bottomLat = anchorStart.lat - heightDeg;
-
-  tokens.forEach((char, idx) => {
-    const glyphPoints = CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['O'] || CONTINUOUS_GLYPHS['RUN'];
-    const leftLng = anchorStart.lng + idx * (charWidthDeg + spacingDeg);
-
-    const mappedPoints: [number, number][] = glyphPoints.map(([x, y]) => {
-      const ptLat = bottomLat + y * heightDeg;
-      const ptLng = leftLng + x * charWidthDeg;
-      return [ptLat, ptLng];
-    });
-
-    if (waypoints.length === 0) {
-      waypoints.push(...mappedPoints);
-    } else {
-      // Connect to the next glyph along top street corridor
-      const nextStart = mappedPoints[0];
-      waypoints.push([topLat, nextStart[1]]);
-      waypoints.push(...mappedPoints);
-    }
-  });
-
-  // Snap the geometric stroke waypoints to real streets, greenways, and cycleways
-  const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig);
-  let finalCoords = snapped.coordinates;
-
-  if (finalCoords.length < 4) {
-    finalCoords = waypoints;
-  }
-
-  const confidenceScore = Math.max(78, Math.min(98, Math.round(96 - tokens.length * 1.5)));
+  // Generate pristine athletic GPS art geometry with continuous curves & baseline transitions
+  const artResult = generateGpsArtPath(text, start, targetDistanceKm, activity);
 
   return {
-    coordinates: finalCoords,
-    confidenceScore,
+    coordinates: artResult.coordinates,
+    confidenceScore: artResult.confidenceScore,
   };
 }
 
@@ -1104,6 +1015,27 @@ export async function generateFullRoute(params: {
   // Workout Stats
   const workoutStats = calculateWorkoutStats(actualDistanceKm, eleData.gainM, activity);
 
+  // Accurate Turn Count based on real angular shifts
+  const calculatedTurns = (() => {
+    if (maskedCoordinates.length < 3) return 2;
+    let count = 0;
+    // Sample every few points to avoid microscopic jitter
+    const step = Math.max(1, Math.floor(maskedCoordinates.length / 100));
+    for (let i = step; i < maskedCoordinates.length - step; i += step) {
+      const pPrev = maskedCoordinates[i - step];
+      const pCurr = maskedCoordinates[i];
+      const pNext = maskedCoordinates[i + step];
+      const b1 = Math.atan2(pCurr[1] - pPrev[1], pCurr[0] - pPrev[0]);
+      const b2 = Math.atan2(pNext[1] - pCurr[1], pNext[0] - pCurr[0]);
+      let diff = Math.abs(b2 - b1);
+      if (diff > Math.PI) diff = 2 * Math.PI - diff;
+      if (diff > (35 * Math.PI) / 180) {
+        count++;
+      }
+    }
+    return Math.max(2, count);
+  })();
+
   const finalStats: RouteStats = {
     distanceKm: Number(actualDistanceKm.toFixed(2)),
     distanceMi: Number((actualDistanceKm * 0.621371).toFixed(2)),
@@ -1112,7 +1044,7 @@ export async function generateFullRoute(params: {
     estimatedDurationMinutes: workoutStats.durationMinutes,
     estimatedCalories: workoutStats.calories,
     confidenceScore,
-    turnCount: Math.round(maskedCoordinates.length * 0.35),
+    turnCount: calculatedTurns,
     highestPointM: eleData.highestM,
     lowestPointM: eleData.lowestM,
   };
