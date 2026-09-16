@@ -34,39 +34,101 @@ interface MapProps {
   isDarkMode?: boolean;
 }
 
-type TileLayerKey = 'outdoors' | 'light' | 'dark' | 'satellite' | 'topo';
+export type TileLayerKey = 'outdoors' | 'topo' | 'osm' | 'light' | 'dark' | 'satellite';
 
-// Robust, fast, and 403-free tile layers with earthy natural cartography
-const TILE_LAYERS: Record<TileLayerKey, { name: string; url: string; attribution: string; subdomains?: string[] }> = {
-  outdoors: {
-    name: 'Natural Outdoors',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
-    subdomains: ['a', 'b', 'c', 'd'],
-  },
-  light: {
-    name: 'Clean Light',
-    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
-    subdomains: ['a', 'b', 'c', 'd'],
-  },
-  dark: {
-    name: 'Tactical Slate',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
-    subdomains: ['a', 'b', 'c', 'd'],
-  },
-  satellite: {
-    name: 'Satellite View',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: '&copy; Esri, Maxar, Earthstar Geographics',
-  },
+const CARTO_API_KEY = (import.meta.env.VITE_CARTO_API_KEY as string | undefined)?.trim() || '';
+const HAS_CARTO_KEY = Boolean(CARTO_API_KEY);
+
+interface TileLayerConfig {
+  name: string;
+  badge?: string;
+  url: string;
+  attribution: string;
+  subdomains?: string[];
+  fallbackUrl?: string;
+  fallbackAttribution?: string;
+}
+
+// Enterprise-grade, watermark-free tile configurations with high-reliability Esri Topo fallback
+const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
+  outdoors: HAS_CARTO_KEY
+    ? {
+        name: 'Natural Outdoors',
+        badge: 'CARTO Key',
+        url: `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`,
+        attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
+        subdomains: ['a', 'b', 'c', 'd'],
+        fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+        fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
+      }
+    : {
+        name: 'Natural Outdoors',
+        badge: 'Esri Topo',
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+        attribution: '&copy; Esri, HERE, Garmin, USGS',
+        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        fallbackAttribution: '&copy; OpenStreetMap contributors',
+      },
   topo: {
     name: 'Topographic Contours',
+    badge: 'Esri Topo',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
-    attribution: '&copy; Esri, DeLorme, NAVTEQ',
+    attribution: '&copy; Esri, DeLorme, NAVTEQ, USGS',
+    fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    fallbackAttribution: '&copy; OpenStreetMap contributors',
   },
-};
+  osm: {
+    name: 'OpenStreetMap Standard',
+    badge: 'OSM',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+    fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
+  },
+  light: HAS_CARTO_KEY
+    ? {
+        name: 'Clean Light',
+        badge: 'CARTO Key',
+        url: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`,
+        attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
+        subdomains: ['a', 'b', 'c', 'd'],
+        fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        fallbackAttribution: '&copy; Esri, DeLorme, NAVTEQ',
+      }
+    : {
+        name: 'Clean Light',
+        badge: 'Esri Canvas',
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        attribution: '&copy; Esri, DeLorme, NAVTEQ',
+        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        fallbackAttribution: '&copy; OpenStreetMap contributors',
+      },
+  dark: HAS_CARTO_KEY
+    ? {
+        name: 'Tactical Slate',
+        badge: 'CARTO Key',
+        url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`,
+        attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
+        subdomains: ['a', 'b', 'c', 'd'],
+        fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        fallbackAttribution: '&copy; Esri, DeLorme, NAVTEQ',
+      }
+    : {
+        name: 'Tactical Slate',
+        badge: 'Esri Canvas',
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        attribution: '&copy; Esri, DeLorme, NAVTEQ',
+        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        fallbackAttribution: '&copy; OpenStreetMap contributors',
+      },
+  satellite: {
+    name: 'Satellite View',
+    badge: 'Esri Imagery',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, Maxar, Earthstar Geographics',
+    fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+  },
+});
 
 export const Map: React.FC<MapProps> = ({
   route,
@@ -88,13 +150,63 @@ export const Map: React.FC<MapProps> = ({
   const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'outdoors');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showLayerMenu, setShowLayerMenu] = useState<boolean>(false);
+  const [fallbackActive, setFallbackActive] = useState<boolean>(false);
 
-  // Sync default layer with theme changes if user hasn't manually swapped to satellite/topo
+  // Sync default layer with theme changes if user hasn't manually swapped to satellite/topo/osm
   useEffect(() => {
     if (activeTile === 'dark' || activeTile === 'outdoors' || activeTile === 'light') {
       setActiveTile(isDarkMode ? 'dark' : 'outdoors');
     }
   }, [isDarkMode]);
+
+  // Helper to instantiate a tile layer with zero-downtime fallback handling
+  const createTileLayer = (key: TileLayerKey): L.TileLayer => {
+    const tileLayers = getTileLayers();
+    const config = tileLayers[key];
+
+    const layer = L.tileLayer(config.url, {
+      attribution: config.attribution,
+      subdomains: config.subdomains || ['a', 'b', 'c', 'd'],
+      maxZoom: 19,
+    });
+
+    if (config.fallbackUrl) {
+      const fallback = config.fallbackUrl;
+      const isArcGis = fallback.includes('/tile/{z}/{y}/{x}');
+      let consecutiveErrors = 0;
+
+      layer.on('tileerror', (event: L.TileErrorEvent) => {
+        consecutiveErrors++;
+        const img = event.tile as HTMLImageElement;
+        if (img && !img.dataset.fallenBack) {
+          img.dataset.fallenBack = 'true';
+          const { x, y, z } = event.coords;
+          if (isArcGis) {
+            img.src = fallback
+              .replace('{z}', String(z))
+              .replace('{y}', String(y))
+              .replace('{x}', String(x));
+          } else {
+            img.src = fallback
+              .replace('{z}', String(z))
+              .replace('{x}', String(x))
+              .replace('{y}', String(y));
+          }
+        }
+
+        // If CARTO fails persistently (e.g. rate-limit or bad key), register fallback state
+        if (consecutiveErrors >= 3) {
+          setFallbackActive(true);
+        }
+      });
+
+      layer.on('tileload', () => {
+        consecutiveErrors = 0;
+      });
+    }
+
+    return layer;
+  };
 
   // Initialize Map
   useEffect(() => {
@@ -107,13 +219,7 @@ export const Map: React.FC<MapProps> = ({
       attributionControl: true,
     });
 
-    const initialLayerConfig = TILE_LAYERS[activeTile];
-    const initialLayer = L.tileLayer(initialLayerConfig.url, {
-      attribution: initialLayerConfig.attribution,
-      subdomains: initialLayerConfig.subdomains || ['a', 'b', 'c', 'd'],
-      maxZoom: 19,
-    }).addTo(map);
-
+    const initialLayer = createTileLayer(activeTile).addTo(map);
     tileLayerRef.current = initialLayer;
     mapInstanceRef.current = map;
 
@@ -136,12 +242,7 @@ export const Map: React.FC<MapProps> = ({
     if (tileLayerRef.current) {
       mapInstanceRef.current.removeLayer(tileLayerRef.current);
     }
-    const layerConfig = TILE_LAYERS[activeTile];
-    const newLayer = L.tileLayer(layerConfig.url, {
-      attribution: layerConfig.attribution,
-      subdomains: layerConfig.subdomains || ['a', 'b', 'c', 'd'],
-      maxZoom: 19,
-    }).addTo(mapInstanceRef.current);
+    const newLayer = createTileLayer(activeTile).addTo(mapInstanceRef.current);
     tileLayerRef.current = newLayer;
   }, [activeTile]);
 
@@ -443,24 +544,47 @@ export const Map: React.FC<MapProps> = ({
           </button>
 
           {showLayerMenu && (
-            <div className="absolute right-0 mt-2 w-48 rounded-xl bg-white/98 dark:bg-[#19201D]/98 border border-[#E5DFD3] dark:border-[#2E3C34] p-1.5 shadow-xl backdrop-blur-md flex flex-col gap-1 text-xs">
-              {(Object.keys(TILE_LAYERS) as TileLayerKey[]).map((key) => (
-                <button
-                  key={key}
-                  onClick={() => {
-                    setActiveTile(key);
-                    setShowLayerMenu(false);
-                  }}
-                  className={`px-3 py-2 rounded-lg text-left transition-colors flex items-center justify-between cursor-pointer ${
-                    activeTile === key
-                      ? 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/30 text-[#2D4F3E] dark:text-[#8EB39F] font-semibold border border-[#2D4F3E]/30 dark:border-[#5C8E76]/40'
-                      : 'text-stone-700 dark:text-stone-300 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
-                  }`}
-                >
-                  <span>{TILE_LAYERS[key].name}</span>
-                  {activeTile === key && <span className="w-1.5 h-1.5 rounded-full bg-[#2D4F3E] dark:bg-[#8EB39F]" />}
-                </button>
-              ))}
+            <div className="absolute right-0 mt-2 w-56 rounded-xl bg-white/98 dark:bg-[#19201D]/98 border border-[#E5DFD3] dark:border-[#2E3C34] p-2 shadow-xl backdrop-blur-md flex flex-col gap-1 text-xs">
+              <div className="px-2 py-1 text-[10px] font-semibold tracking-wider uppercase text-stone-500 dark:text-stone-400 flex items-center justify-between border-b border-stone-200 dark:border-stone-800 pb-1.5 mb-1">
+                <span>Map Cartography</span>
+                {HAS_CARTO_KEY ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">CARTO Active</span>
+                ) : (
+                  <span className="text-stone-500 dark:text-stone-400 font-normal">Esri &amp; OSM</span>
+                )}
+              </div>
+
+              {(Object.keys(getTileLayers()) as TileLayerKey[]).map((key) => {
+                const config = getTileLayers()[key];
+                return (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      setActiveTile(key);
+                      setShowLayerMenu(false);
+                    }}
+                    className={`px-3 py-2 rounded-lg text-left transition-colors flex items-center justify-between cursor-pointer ${
+                      activeTile === key
+                        ? 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/30 text-[#2D4F3E] dark:text-[#8EB39F] font-semibold border border-[#2D4F3E]/30 dark:border-[#5C8E76]/40'
+                        : 'text-stone-700 dark:text-stone-300 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
+                    }`}
+                  >
+                    <div className="flex flex-col">
+                      <span>{config.name}</span>
+                      {config.badge && (
+                        <span className="text-[10px] text-stone-500 dark:text-stone-400 font-normal">{config.badge}</span>
+                      )}
+                    </div>
+                    {activeTile === key && <span className="w-1.5 h-1.5 rounded-full bg-[#2D4F3E] dark:bg-[#8EB39F]" />}
+                  </button>
+                );
+              })}
+
+              {!HAS_CARTO_KEY && (
+                <div className="mt-1 pt-1.5 border-t border-stone-200 dark:border-stone-800 px-2 text-[10px] text-stone-500 dark:text-stone-400 leading-tight">
+                  Watermark-free Esri Topo active. Optional CARTO key can be set via <code className="font-mono text-stone-700 dark:text-stone-300">VITE_CARTO_API_KEY</code>.
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -511,6 +635,9 @@ export const Map: React.FC<MapProps> = ({
         <span>LAT: {selectedLocation.lat.toFixed(4)}</span>
         <span>LNG: {selectedLocation.lng.toFixed(4)}</span>
         {route && <span>PTS: {route.coordinates.length}</span>}
+        {fallbackActive && (
+          <span className="text-amber-600 dark:text-amber-400 font-medium">Fallback Active</span>
+        )}
       </div>
     </div>
   );
