@@ -70,7 +70,6 @@ const GPS_ART_SHAPES = [
 ];
 
 const GPS_ART_WORDS = [
-  '10',
   'RUN',
   '5K',
   '10K',
@@ -415,7 +414,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
       </div>
 
       {/* 4. CONDITIONAL LOGIC: GPS Art Text Input & Controls */}
-      {routeType === 'gps_art' && (
+      {routeType === 'gps_art' ? (
         <div className="p-3.5 rounded-2xl bg-[#8A4A72]/10 dark:bg-[#8A4A72]/20 border border-[#8A4A72]/30 flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-[#8A4A72] dark:text-[#E1B8D4] flex items-center justify-between">
@@ -482,106 +481,106 @@ export const RouteForm: React.FC<RouteFormProps> = ({
             </div>
           </div>
 
-          {/* Athletic Geometry & Precision Note */}
+          {/* Smart Alignment & Unrestricted Geometry Note */}
           <div className="p-2.5 rounded-xl bg-[#8A4A72]/15 dark:bg-[#8A4A72]/30 border border-[#8A4A72]/30 text-[11px] text-stone-700 dark:text-stone-300 flex items-start gap-2">
             <Sparkles className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4] shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              <strong className="text-[#8A4A72] dark:text-[#E1B8D4]">Pristine Athletic Art:</strong> Starts directly at your pin with smooth rounded geometry and clean baseline transitions scaled to your target workout distance.
+              <strong className="text-[#8A4A72] dark:text-[#E1B8D4]">Optimal Placement:</strong> Art starts near your location pin or snaps to the cleanest nearby road intersection for crisp, distortion-free lines without mileage restrictions.
             </p>
           </div>
         </div>
+      ) : (
+        /* 5. Target Distance: Only shown for standard Loop and Out & Back routes */
+        <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
+          <div className="flex items-center justify-between">
+            <label htmlFor="target-distance-input" className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+              Target Distance
+            </label>
+            <div className="flex items-center rounded-lg bg-[#F4EFE6] dark:bg-[#121614] p-0.5 border border-[#E5DFD3] dark:border-[#2E3C34]">
+              <button
+                type="button"
+                id="unit-km-btn"
+                onClick={() => onUnitChange('km')}
+                className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
+                  unit === 'km' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                }`}
+              >
+                KM
+              </button>
+              <button
+                type="button"
+                id="unit-mi-btn"
+                onClick={() => onUnitChange('mi')}
+                className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
+                  unit === 'mi' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
+                }`}
+              >
+                MILES
+              </button>
+            </div>
+          </div>
+
+          {/* Dedicated Numeric Input Box with Steppers */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => adjustDistance(-0.5)}
+              aria-label="Decrease distance"
+              className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <Minus className="w-4 h-4" />
+            </button>
+
+            <div className="relative flex-1">
+              <input
+                type="number"
+                id="target-distance-input"
+                min="0.5"
+                max="150"
+                step="0.1"
+                value={distanceValue}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val)) setDistanceValue(val);
+                  else setDistanceValue(0);
+                }}
+                className="w-full text-center py-2 px-3 text-lg font-mono font-bold text-[#2D4F3E] dark:text-[#7EB89B] bg-[#F8F5EE] dark:bg-[#121614] border border-[#E5DFD3] dark:border-[#2E3C34] rounded-xl focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76]"
+              />
+              <span className="absolute right-3 top-2.5 text-xs font-mono font-semibold text-stone-400">
+                {unit}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => adjustDistance(0.5)}
+              aria-label="Increase distance"
+              className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Quick Distance Preset Chips */}
+          <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+            <span className="text-[10px] text-stone-500 font-medium">Presets:</span>
+            {distancePresets.map((val) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setDistanceValue(val)}
+                className={`px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors border cursor-pointer ${
+                  distanceValue === val
+                    ? 'bg-[#2D4F3E] text-white border-[#2D4F3E] font-semibold'
+                    : 'bg-[#F4EFE6] dark:bg-[#25302A] text-stone-700 dark:text-stone-300 border-[#E5DFD3] dark:border-[#2E3C34] hover:bg-[#EAE4D7] dark:hover:bg-[#324038]'
+                }`}
+              >
+                {val} {unit}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
-
-      {/* 5. Target Workout Distance (Available for Loops, Out-and-Backs & Scaled GPS Art) */}
-      <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
-        <div className="flex items-center justify-between">
-          <label htmlFor="target-distance-input" className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-            {routeType === 'gps_art' ? 'Target Art Distance' : 'Target Distance'}
-          </label>
-          <div className="flex items-center rounded-lg bg-[#F4EFE6] dark:bg-[#121614] p-0.5 border border-[#E5DFD3] dark:border-[#2E3C34]">
-            <button
-              type="button"
-              id="unit-km-btn"
-              onClick={() => onUnitChange('km')}
-              className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
-                unit === 'km' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-              }`}
-            >
-              KM
-            </button>
-            <button
-              type="button"
-              id="unit-mi-btn"
-              onClick={() => onUnitChange('mi')}
-              className={`px-2.5 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-colors cursor-pointer ${
-                unit === 'mi' ? 'bg-[#2D4F3E] text-white shadow-sm' : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white'
-              }`}
-            >
-              MILES
-            </button>
-          </div>
-        </div>
-
-        {/* Dedicated Numeric Input Box with Steppers */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => adjustDistance(-0.5)}
-            aria-label="Decrease distance"
-            className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <Minus className="w-4 h-4" />
-          </button>
-
-          <div className="relative flex-1">
-            <input
-              type="number"
-              id="target-distance-input"
-              min="0.5"
-              max="150"
-              step="0.1"
-              value={distanceValue}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                if (!isNaN(val)) setDistanceValue(val);
-                else setDistanceValue(0);
-              }}
-              className="w-full text-center py-2 px-3 text-lg font-mono font-bold text-[#2D4F3E] dark:text-[#7EB89B] bg-[#F8F5EE] dark:bg-[#121614] border border-[#E5DFD3] dark:border-[#2E3C34] rounded-xl focus:outline-none focus:border-[#2D4F3E] dark:focus:border-[#5C8E76]"
-            />
-            <span className="absolute right-3 top-2.5 text-xs font-mono font-semibold text-stone-400">
-              {unit}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => adjustDistance(0.5)}
-            aria-label="Increase distance"
-            className="w-10 h-10 rounded-xl bg-[#F4EFE6] dark:bg-[#25302A] border border-[#E5DFD3] dark:border-[#2E3C34] text-stone-700 dark:text-stone-300 hover:bg-[#EAE4D7] dark:hover:bg-[#324038] flex items-center justify-center transition-colors cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Quick Distance Preset Chips */}
-        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-          <span className="text-[10px] text-stone-500 font-medium">Presets:</span>
-          {distancePresets.map((val) => (
-            <button
-              key={val}
-              type="button"
-              onClick={() => setDistanceValue(val)}
-              className={`px-2 py-0.5 rounded-md text-[11px] font-mono transition-colors border cursor-pointer ${
-                distanceValue === val
-                  ? 'bg-[#2D4F3E] text-white border-[#2D4F3E] font-semibold'
-                  : 'bg-[#F4EFE6] dark:bg-[#25302A] text-stone-700 dark:text-stone-300 border-[#E5DFD3] dark:border-[#2E3C34] hover:bg-[#EAE4D7] dark:hover:bg-[#324038]'
-              }`}
-            >
-              {val} {unit}
-            </button>
-          ))}
-        </div>
-      </div>
       </div>
 
       {/* Generate Route CTA Button */}
@@ -594,15 +593,13 @@ export const RouteForm: React.FC<RouteFormProps> = ({
         {isLoading ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin text-white" />
-            <span>
-              {routeType === 'gps_art' ? 'Drawing Precision GPS Art...' : 'Calculating Real Road Snapping...'}
-            </span>
+            <span>Calculating Real Road Snapping...</span>
           </>
         ) : (
           <>
             <Zap className="w-4 h-4 fill-white" />
             <span>
-              {routeType === 'gps_art' ? `Generate "${gpsArtText || '10'}" GPS Art` : 'Generate Optimal Route'}
+              {routeType === 'gps_art' ? `Generate "${gpsArtText || 'RUN'}" GPS Art` : 'Generate Optimal Route'}
             </span>
           </>
         )}
