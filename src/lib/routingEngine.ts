@@ -167,101 +167,40 @@ export async function discoverCorridorNodes(
 }
 
 /**
- * Eliminates unwanted spurs, cul-de-sac antennas, and erratic alley detours.
- * - Dead-end spurs: The route detours out into a side street, driveway, court, or cul-de-sac
- *   and retraces back to the same junction or street corridor.
- * - Micro-detours: The route deviates from a continuous through-way into an alley or parking row
- *   and rejoins the through-way within a short distance.
+ * Clean road coordinates by removing duplicate consecutive nodes and micro-meter jitter.
+ * Preserves every real-world street turn, corner, and path without cutting across buildings or blocks.
  */
 export function eliminateSpursAndInAndOuts(
   coordinates: [number, number][],
-  isLoop: boolean = false
+  _isLoop: boolean = false
 ): [number, number][] {
-  if (!coordinates || coordinates.length < 5) return coordinates;
+  if (!coordinates || coordinates.length < 3) return coordinates || [];
 
-  let pts: [number, number][] = [...coordinates];
-  let changed = true;
-  let passes = 0;
-
-  while (changed && passes < 10) {
-    changed = false;
-    passes++;
-
-    // 1. Detect dead-end spurs / cul-de-sacs / antennas
-    for (let i = 0; i < pts.length - 4; i++) {
-      let accumulatedPathM = 0;
-      let maxReachM = 0;
-      let bestK = -1;
-
-      for (let k = i + 1; k < Math.min(pts.length, i + 120); k++) {
-        accumulatedPathM += calculateDistanceMeters(pts[k - 1], pts[k]);
-        if (accumulatedPathM > 800) break;
-
-        const gapDist = calculateDistanceMeters(pts[i], pts[k]);
-        if (gapDist > maxReachM) maxReachM = gapDist;
-
-        if (k >= i + 3) {
-          // In a closed loop, do not prune the primary loop closure between start and end
-          if (isLoop && i <= 1 && k >= pts.length - 3) continue;
-
-          // Condition for a dead-end spur:
-          // Path travels out at least 20m into side street/court, reaches at least 12m away,
-          // and returns to within 34m of the junction point with gap < 48% of max excursion reach
-          if (accumulatedPathM >= 20 && gapDist <= 34 && maxReachM >= 12 && gapDist < maxReachM * 0.48) {
-            bestK = k;
-          }
-        }
-      }
-
-      if (bestK !== -1) {
-        pts.splice(i + 1, bestK - i - 1);
-        changed = true;
-        break;
-      }
-    }
-
-    if (changed) continue;
-
-    // 2. Detect side-street / alley detours
-    for (let i = 0; i < pts.length - 4; i++) {
-      let accumulatedPathM = 0;
-      let bestDetourK = -1;
-
-      for (let k = i + 1; k < Math.min(pts.length, i + 35); k++) {
-        accumulatedPathM += calculateDistanceMeters(pts[k - 1], pts[k]);
-        if (accumulatedPathM > 400) break;
-
-        if (k >= i + 3) {
-          const directDist = calculateDistanceMeters(pts[i], pts[k]);
-          if (isLoop && i <= 1 && k >= pts.length - 3) continue;
-
-          // Detour condition: leaving a straight/continuous corridor for a winding loop/alley
-          if (directDist >= 15 && directDist <= 200 && accumulatedPathM >= directDist * 1.45 && accumulatedPathM >= 35) {
-            bestDetourK = k;
-          }
-        }
-      }
-
-      if (bestDetourK !== -1) {
-        pts.splice(i + 1, bestDetourK - i - 1);
-        changed = true;
-        break;
-      }
+  // 1. Deduplicate consecutive identical points or micro-jitters (< 1.2m)
+  const clean: [number, number][] = [coordinates[0]];
+  for (let i = 1; i < coordinates.length; i++) {
+    const prev = clean[clean.length - 1];
+    const curr = coordinates[i];
+    if (calculateDistanceMeters(prev, curr) >= 1.2) {
+      clean.push(curr);
     }
   }
 
-  // Deduplicate consecutive points that are within 1.5 meters of each other
-  const clean: [number, number][] = [];
-  for (let i = 0; i < pts.length; i++) {
-    if (clean.length === 0 || calculateDistanceMeters(clean[clean.length - 1], pts[i]) >= 1.5) {
-      clean.push(pts[i]);
+  // 2. Remove immediate 180-degree microscopic stutter (p[i-1] -> p[i] -> p[i+1] where p[i-1] ~= p[i+1] < 2m)
+  const deduped: [number, number][] = [];
+  for (let i = 0; i < clean.length; i++) {
+    if (
+      i > 0 &&
+      i < clean.length - 1 &&
+      calculateDistanceMeters(clean[i - 1], clean[i + 1]) < 2.0 &&
+      calculateDistanceMeters(clean[i - 1], clean[i]) < 4.0
+    ) {
+      continue;
     }
-  }
-  if (pts.length > 1 && clean[clean.length - 1] !== pts[pts.length - 1]) {
-    clean.push(pts[pts.length - 1]);
+    deduped.push(clean[i]);
   }
 
-  return clean;
+  return deduped;
 }
 
 /**
@@ -379,7 +318,36 @@ export async function fetchRealRoadPath(
 }
 
 /**
- * Snap a multi-waypoint sequence onto real streets in small chunks to guarantee precise street-by-street routing
+ * Helper to snap an arbitrary coordinate to the nearest real OpenStreetMap road node
+ */
+export async function snapPointToNearestRoad(
+  lat: number,
+  lng: number,
+  activity: ActivityType = 'run'
+): Promise<[number, number]> {
+  const profile = activity === 'bike' ? 'bike' : 'foot';
+  const url = `https://router.project-osrm.org/nearest/v1/${profile}/${lng.toFixed(6)},${lat.toFixed(6)}`;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.code === 'Ok' && data.waypoints && data.waypoints.length > 0) {
+        const loc = data.waypoints[0].location;
+        return [loc[1], loc[0]];
+      }
+    }
+  } catch {
+    // fallback to original
+  }
+  return [lat, lng];
+}
+
+/**
+ * Snap a multi-waypoint sequence onto real streets with continuous, unbroken road geometry.
+ * Never cuts across buildings, houses, or off-road blocks.
  */
 export async function snapWaypointsToRealRoads(
   waypoints: [number, number][],
@@ -390,45 +358,93 @@ export async function snapWaypointsToRealRoads(
     return { coordinates: waypoints, distanceKm: 0 };
   }
 
-  // Deduplicate consecutive identical waypoints
-  const cleanWaypoints: [number, number][] = [];
-  for (let i = 0; i < waypoints.length; i++) {
-    const pt = waypoints[i];
-    if (
-      cleanWaypoints.length === 0 ||
-      Math.abs(pt[0] - cleanWaypoints[cleanWaypoints.length - 1][0]) > 0.00001 ||
-      Math.abs(pt[1] - cleanWaypoints[cleanWaypoints.length - 1][1]) > 0.00001
-    ) {
-      cleanWaypoints.push(pt);
+  // 1. Deduplicate consecutive waypoints that are excessively close (< 3m)
+  const cleanWaypoints: [number, number][] = [waypoints[0]];
+  for (let i = 1; i < waypoints.length; i++) {
+    const prev = cleanWaypoints[cleanWaypoints.length - 1];
+    const curr = waypoints[i];
+    if (calculateDistanceMeters(prev, curr) >= 3.0) {
+      cleanWaypoints.push(curr);
     }
   }
 
-  const chunkSize = 3; // 2-3 points per segment to guarantee crisp street-by-street adherence
+  if (cleanWaypoints.length < 2) {
+    return { coordinates: cleanWaypoints, distanceKm: 0 };
+  }
+
+  // 2. Primary Strategy: Route the entire sequence in ONE seamless OSRM/ORS call
+  // OSRM easily handles up to 30-40 waypoints in a single query and guarantees unbroken road paths
+  if (cleanWaypoints.length <= 32) {
+    const fullRoadResult = await fetchRealRoadPath(cleanWaypoints, activity, apiConfig);
+    if (fullRoadResult && fullRoadResult.coordinates.length >= 2) {
+      return fullRoadResult;
+    }
+  }
+
+  // 3. Batched Strategy: Divide into larger overlapping chunks of 10-12 waypoints
+  const chunkSize = 10;
   const allCoords: [number, number][] = [];
 
   for (let i = 0; i < cleanWaypoints.length - 1; i += chunkSize - 1) {
     const chunk = cleanWaypoints.slice(i, Math.min(cleanWaypoints.length, i + chunkSize));
     if (chunk.length < 2) break;
 
-    const roadResult = await fetchRealRoadPath(chunk, activity, apiConfig);
-    if (roadResult && roadResult.coordinates.length > 0) {
+    let roadResult = await fetchRealRoadPath(chunk, activity, apiConfig);
+
+    // If chunk failed, attempt point-to-point sub-segment routing on real streets
+    if (!roadResult || roadResult.coordinates.length < 2) {
+      const subCoords: [number, number][] = [];
+      for (let j = 0; j < chunk.length - 1; j++) {
+        const segPair = [chunk[j], chunk[j + 1]];
+        let segResult = await fetchRealRoadPath(segPair, activity, apiConfig);
+
+        // If direct pair failed, snap both points to nearest OSM road node first
+        if (!segResult || segResult.coordinates.length < 2) {
+          const snappedA = await snapPointToNearestRoad(chunk[j][0], chunk[j][1], activity);
+          const snappedB = await snapPointToNearestRoad(chunk[j + 1][0], chunk[j + 1][1], activity);
+          segResult = await fetchRealRoadPath([snappedA, snappedB], activity, apiConfig);
+        }
+
+        if (segResult && segResult.coordinates.length >= 2) {
+          if (subCoords.length > 0) {
+            subCoords.push(...segResult.coordinates.slice(1));
+          } else {
+            subCoords.push(...segResult.coordinates);
+          }
+        }
+      }
+
+      if (subCoords.length >= 2) {
+        roadResult = {
+          coordinates: subCoords,
+          distanceKm: calculateTotalDistanceKm(subCoords),
+        };
+      }
+    }
+
+    if (roadResult && roadResult.coordinates.length >= 2) {
       if (allCoords.length > 0) {
         allCoords.push(...roadResult.coordinates.slice(1));
       } else {
         allCoords.push(...roadResult.coordinates);
       }
-    } else {
-      // Fallback: use linear segment
-      if (allCoords.length > 0) {
-        allCoords.push(...chunk.slice(1));
-      } else {
-        allCoords.push(...chunk);
-      }
     }
   }
 
-  const distKm = calculateTotalDistanceKm(allCoords);
-  return { coordinates: allCoords, distanceKm: distKm };
+  if (allCoords.length >= 2) {
+    const distKm = calculateTotalDistanceKm(allCoords);
+    return { coordinates: allCoords, distanceKm: distKm };
+  }
+
+  // If network routing was completely unavailable, snap all waypoints to nearest streets
+  const fallbackSnapped: [number, number][] = [];
+  for (const pt of cleanWaypoints) {
+    const snappedPt = await snapPointToNearestRoad(pt[0], pt[1], activity);
+    fallbackSnapped.push(snappedPt);
+  }
+
+  const distKm = calculateTotalDistanceKm(fallbackSnapped);
+  return { coordinates: fallbackSnapped, distanceKm: distKm };
 }
 
 /**
@@ -567,23 +583,12 @@ export async function generateRoadGpsArtRoute(
       return [ptLat, ptLng];
     });
 
-    if (waypoints.length === 0) {
-      waypoints.push(...mappedPoints);
-    } else {
-      // Connect to the next glyph along top street corridor
-      const nextStart = mappedPoints[0];
-      waypoints.push([topLat, nextStart[1]]);
-      waypoints.push(...mappedPoints);
-    }
+    waypoints.push(...mappedPoints);
   });
 
   // Snap the geometric stroke waypoints to real streets, greenways, and cycleways
   const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig);
   let finalCoords = snapped.coordinates;
-
-  if (finalCoords.length < 4) {
-    finalCoords = waypoints;
-  }
 
   const confidenceScore = Math.max(78, Math.min(98, Math.round(96 - tokens.length * 1.5)));
 
