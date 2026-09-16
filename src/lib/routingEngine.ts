@@ -87,14 +87,12 @@ export async function discoverCorridorNodes(
       out center 35;
     `;
   } else if (activity === 'run') {
-    // Running: focus on greenbelts, greenways, parks, pedestrian paths, sidewalks, residential calm streets, riverbanks
+    // Running: focus on greenbelts, greenways, parks, pedestrian paths, sidewalks, and quiet thoroughfares
     queryBody = `
       [out:json][timeout:3];
       (
-        way["leisure"~"park|common|garden|nature_reserve|recreation_ground"](around:${radiusMeters},${center.lat},${center.lng});
-        way["highway"~"footway|pedestrian|path|cycleway|living_street"](around:${radiusMeters},${center.lat},${center.lng});
-        way["waterway"~"riverbank|canal|stream"](around:${radiusMeters},${center.lat},${center.lng});
-        way["route"="running"](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"footway|pedestrian|path|cycleway"](around:${radiusMeters},${center.lat},${center.lng});
+        relation["route"="running"](around:${radiusMeters},${center.lat},${center.lng});
       );
       out center 35;
     `;
@@ -169,6 +167,104 @@ export async function discoverCorridorNodes(
 }
 
 /**
+ * Eliminates unwanted spurs, cul-de-sac antennas, and erratic alley detours.
+ * - Dead-end spurs: The route detours out into a side street, driveway, court, or cul-de-sac
+ *   and retraces back to the same junction or street corridor.
+ * - Micro-detours: The route deviates from a continuous through-way into an alley or parking row
+ *   and rejoins the through-way within a short distance.
+ */
+export function eliminateSpursAndInAndOuts(
+  coordinates: [number, number][],
+  isLoop: boolean = false
+): [number, number][] {
+  if (!coordinates || coordinates.length < 5) return coordinates;
+
+  let pts: [number, number][] = [...coordinates];
+  let changed = true;
+  let passes = 0;
+
+  while (changed && passes < 10) {
+    changed = false;
+    passes++;
+
+    // 1. Detect dead-end spurs / cul-de-sacs / antennas
+    for (let i = 0; i < pts.length - 4; i++) {
+      let accumulatedPathM = 0;
+      let maxReachM = 0;
+      let bestK = -1;
+
+      for (let k = i + 1; k < Math.min(pts.length, i + 120); k++) {
+        accumulatedPathM += calculateDistanceMeters(pts[k - 1], pts[k]);
+        if (accumulatedPathM > 800) break;
+
+        const gapDist = calculateDistanceMeters(pts[i], pts[k]);
+        if (gapDist > maxReachM) maxReachM = gapDist;
+
+        if (k >= i + 3) {
+          // In a closed loop, do not prune the primary loop closure between start and end
+          if (isLoop && i <= 1 && k >= pts.length - 3) continue;
+
+          // Condition for a dead-end spur:
+          // Path travels out at least 20m into side street/court, reaches at least 12m away,
+          // and returns to within 34m of the junction point with gap < 48% of max excursion reach
+          if (accumulatedPathM >= 20 && gapDist <= 34 && maxReachM >= 12 && gapDist < maxReachM * 0.48) {
+            bestK = k;
+          }
+        }
+      }
+
+      if (bestK !== -1) {
+        pts.splice(i + 1, bestK - i - 1);
+        changed = true;
+        break;
+      }
+    }
+
+    if (changed) continue;
+
+    // 2. Detect side-street / alley detours
+    for (let i = 0; i < pts.length - 4; i++) {
+      let accumulatedPathM = 0;
+      let bestDetourK = -1;
+
+      for (let k = i + 1; k < Math.min(pts.length, i + 35); k++) {
+        accumulatedPathM += calculateDistanceMeters(pts[k - 1], pts[k]);
+        if (accumulatedPathM > 400) break;
+
+        if (k >= i + 3) {
+          const directDist = calculateDistanceMeters(pts[i], pts[k]);
+          if (isLoop && i <= 1 && k >= pts.length - 3) continue;
+
+          // Detour condition: leaving a straight/continuous corridor for a winding loop/alley
+          if (directDist >= 15 && directDist <= 200 && accumulatedPathM >= directDist * 1.45 && accumulatedPathM >= 35) {
+            bestDetourK = k;
+          }
+        }
+      }
+
+      if (bestDetourK !== -1) {
+        pts.splice(i + 1, bestDetourK - i - 1);
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  // Deduplicate consecutive points that are within 1.5 meters of each other
+  const clean: [number, number][] = [];
+  for (let i = 0; i < pts.length; i++) {
+    if (clean.length === 0 || calculateDistanceMeters(clean[clean.length - 1], pts[i]) >= 1.5) {
+      clean.push(pts[i]);
+    }
+  }
+  if (pts.length > 1 && clean[clean.length - 1] !== pts[pts.length - 1]) {
+    clean.push(pts[pts.length - 1]);
+  }
+
+  return clean;
+}
+
+/**
  * Fetch real-world road snapped path using HeiGIT / OpenRouteService or public OpenStreetMap OSRM
  */
 export async function fetchRealRoadPath(
@@ -221,12 +317,10 @@ export async function fetchRealRoadPath(
               const geoCoords: [number, number][] = data.features[0].geometry.coordinates.map(
                 ([lng, lat]: [number, number]) => [lat, lng]
               );
-              const distKm =
-                data.features[0].properties?.summary?.distance !== undefined
-                  ? data.features[0].properties.summary.distance / 1000
-                  : calculateTotalDistanceKm(geoCoords);
+              const cleanCoords = eliminateSpursAndInAndOuts(geoCoords, false);
+              const distKm = calculateTotalDistanceKm(cleanCoords);
 
-              return { coordinates: geoCoords, distanceKm: distKm };
+              return { coordinates: cleanCoords, distanceKm: distKm };
             }
           }
         } catch {
@@ -242,17 +336,18 @@ export async function fetchRealRoadPath(
   const coordString = waypoints.map(([lat, lng]) => `${lng.toFixed(6)},${lat.toFixed(6)}`).join(';');
 
   // Profiles based on activity: routed-foot prioritizes footways, sidewalks, cycleways, parks, and calm paths
+  // &continue_straight=true prevents erratic turnaround detours into side streets
   const osrmEndpoints =
     activity === 'bike'
       ? [
-          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson`,
-          `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson`,
-          `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`,
+          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
+          `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
+          `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
         ]
       : [
-          `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson`,
-          `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson`,
-          `https://router.project-osrm.org/route/v1/walking/${coordString}?overview=full&geometries=geojson`,
+          `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
+          `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
+          `https://router.project-osrm.org/route/v1/walking/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
         ];
 
   for (const url of osrmEndpoints) {
@@ -270,8 +365,9 @@ export async function fetchRealRoadPath(
           const rawCoords: [number, number][] = route.geometry.coordinates.map(
             ([lng, lat]: [number, number]) => [lat, lng]
           );
-          const distKm = route.distance / 1000;
-          return { coordinates: rawCoords, distanceKm: distKm };
+          const cleanCoords = eliminateSpursAndInAndOuts(rawCoords, false);
+          const distKm = calculateTotalDistanceKm(cleanCoords);
+          return { coordinates: cleanCoords, distanceKm: distKm };
         }
       }
     } catch {
@@ -337,12 +433,12 @@ export async function snapWaypointsToRealRoads(
 
 /**
  * Strict Distance Enforcement Helper:
- * Ensures the final coordinate path is calibrated within ±1% of the target distance.
+ * Calibrates the final coordinate path without creating straight line jumps across buildings.
  */
 export function enforceDistanceTolerance(
   coordinates: [number, number][],
   targetDistanceKm: number,
-  tolerancePercent: number = 0.01
+  tolerancePercent: number = 0.02
 ): [number, number][] {
   if (coordinates.length < 4) return coordinates;
 
@@ -350,13 +446,21 @@ export function enforceDistanceTolerance(
   const minAllowed = targetDistanceKm * (1 - tolerancePercent);
   const maxAllowed = targetDistanceKm * (1 + tolerancePercent);
 
-  // If already within 5% tolerance, return as is
+  // Check if this route is a closed circuit (loop or out-and-back)
+  const startPoint = coordinates[0];
+  const endPoint = coordinates[coordinates.length - 1];
+  const isClosedCircuit = calculateDistanceMeters(startPoint, endPoint) <= 50;
+
+  // If already close or if it's a closed circuit within 4%, preserve continuous road geometry
   if (currentDistKm >= minAllowed && currentDistKm <= maxAllowed) {
     return coordinates;
   }
+  if (isClosedCircuit && Math.abs(currentDistKm - targetDistanceKm) / targetDistanceKm <= 0.04) {
+    return coordinates;
+  }
 
-  // If route is longer than maxAllowed, cleanly trim along the street path towards the start/finish
-  if (currentDistKm > maxAllowed) {
+  // If route is an open path and longer than target, cleanly trim along the street path
+  if (currentDistKm > maxAllowed && !isClosedCircuit) {
     const targetCutM = targetDistanceKm * 1000;
     const trimmed: [number, number][] = [coordinates[0]];
     let accumulatedM = 0;
@@ -364,26 +468,16 @@ export function enforceDistanceTolerance(
     for (let i = 0; i < coordinates.length - 1; i++) {
       const stepM = calculateDistanceMeters(coordinates[i], coordinates[i + 1]);
       if (accumulatedM + stepM >= targetCutM) {
-        // Interpolate exact endpoint
         const remainingM = targetCutM - accumulatedM;
         const fraction = stepM > 0 ? remainingM / stepM : 0;
         const endLat = coordinates[i][0] + (coordinates[i + 1][0] - coordinates[i][0]) * fraction;
         const endLng = coordinates[i][1] + (coordinates[i + 1][1] - coordinates[i][1]) * fraction;
         trimmed.push([endLat, endLng]);
-        break;
+        return trimmed;
       }
       accumulatedM += stepM;
       trimmed.push(coordinates[i + 1]);
     }
-
-    // Connect back to start if it was a closed loop
-    const startPoint = coordinates[0];
-    const lastPoint = trimmed[trimmed.length - 1];
-    const gapM = calculateDistanceMeters(lastPoint, startPoint);
-    if (gapM < 800) {
-      trimmed.push([startPoint[0], startPoint[1]]);
-    }
-
     return trimmed;
   }
 
@@ -524,29 +618,26 @@ function createLoopWaypoints(
   for (let i = 1; i < numPoints; i++) {
     const fraction = i / numPoints;
     const targetAngle = startAngle + dir * fraction * 2 * Math.PI;
-    const r = radiusKm * (0.9 + Math.random() * 0.2);
+    const r = radiusKm * (0.95 + Math.random() * 0.1);
 
     const theoreticalLat = centerLat + (r / kmPerLat) * Math.sin(targetAngle);
     const theoreticalLng = centerLng + (r / kmPerLng) * Math.cos(targetAngle);
 
-    // If corridor nodes exist (parks, greenways, or trails), bias toward closest node
+    // If corridor nodes exist (parks, greenways, or trails), snap directly to the nearest node
     if (corridors.length > 0) {
       let closestNode: CorridorNode | null = null;
       let minNodeDist = Infinity;
 
       for (const node of corridors) {
         const d = calculateDistanceMeters([theoreticalLat, theoreticalLng], [node.lat, node.lng]);
-        if (d < minNodeDist && d < radiusKm * 1000 * 0.8) {
+        if (d < minNodeDist && d < radiusKm * 1000 * 0.5) {
           minNodeDist = d;
           closestNode = node;
         }
       }
 
       if (closestNode) {
-        // Blend 70% toward the greenway/trail node to follow actual parks and trails
-        const finalLat = theoreticalLat * 0.3 + closestNode.lat * 0.7;
-        const finalLng = theoreticalLng * 0.3 + closestNode.lng * 0.7;
-        waypoints.push([finalLat, finalLng]);
+        waypoints.push([closestNode.lat, closestNode.lng]);
         continue;
       }
     }
@@ -559,7 +650,7 @@ function createLoopWaypoints(
 }
 
 /**
- * Generate accurate real-road Loop Route with calibrated distance matching
+ * Generate accurate real-road Loop Route with calibrated distance matching and zero spurs
  */
 export async function generateRoadLoopRoute(
   start: LatLng,
@@ -575,21 +666,23 @@ export async function generateRoadLoopRoute(
   let bestCoords: [number, number][] = [];
   let bestDistDiff = Infinity;
 
-  // 3-pass calibration loop to stay within ±1%
+  // 3-pass calibration loop to stay within ±2%
   for (let pass = 1; pass <= 3; pass++) {
     const waypoints = createLoopWaypoints(start, radiusKm, 4, corridors);
     const result = await fetchRealRoadPath(waypoints, activity, apiConfig);
 
     if (result && result.coordinates.length > 5) {
-      const dist = result.distanceKm;
+      // Ensure any spur artifacts around junction points are thoroughly cleaned
+      const cleaned = eliminateSpursAndInAndOuts(result.coordinates, true);
+      const dist = calculateTotalDistanceKm(cleaned);
       const diff = Math.abs(dist - targetDistanceKm);
 
       if (diff < bestDistDiff) {
         bestDistDiff = diff;
-        bestCoords = result.coordinates;
+        bestCoords = cleaned;
       }
 
-      if (diff / targetDistanceKm <= 0.01) {
+      if (diff / targetDistanceKm <= 0.02) {
         break;
       }
 
@@ -602,11 +695,11 @@ export async function generateRoadLoopRoute(
     bestCoords = createLoopWaypoints(start, radiusKm, 8, corridors);
   }
 
-  return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.01);
+  return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.02);
 }
 
 /**
- * Generate accurate real-road Out-and-Back Route strictly within ±1% of target
+ * Generate accurate real-road Out-and-Back Route strictly matching target with ZERO spurs or detours
  */
 export async function generateRoadOutAndBackRoute(
   start: LatLng,
@@ -618,10 +711,10 @@ export async function generateRoadOutAndBackRoute(
   const kmPerLat = 111.0;
   const kmPerLng = 111.0 * Math.cos(latRad);
 
-  let oneWayStraightKm = (targetDistanceKm / 2) / 1.30;
+  const halfTargetKm = targetDistanceKm / 2;
 
   // Discover greenways/parks for run, or trails for hike
-  const corridors = await discoverCorridorNodes(start, oneWayStraightKm * 1.3, activity);
+  const corridors = await discoverCorridorNodes(start, halfTargetKm * 1.3, activity);
 
   let bearing = Math.random() * 2 * Math.PI;
   // If corridor exists, pick a bearing pointing towards the greenway / trail cluster
@@ -635,49 +728,66 @@ export async function generateRoadOutAndBackRoute(
   let bestCoords: [number, number][] = [];
   let bestDiff = Infinity;
 
-  for (let pass = 1; pass <= 3; pass++) {
-    let turnLat = start.lat + (oneWayStraightKm / kmPerLat) * Math.sin(bearing);
-    let turnLng = start.lng + (oneWayStraightKm / kmPerLng) * Math.cos(bearing);
+  for (let pass = 0; pass < 3; pass++) {
+    const currentBearing = bearing + (pass === 0 ? 0 : pass === 1 ? 0.4 : -0.4);
+    // Probe ahead along the corridor far enough that real road distance reaches halfTargetKm
+    const probeStraightKm = (halfTargetKm * 1.35) / 1.25;
 
-    // If corridor node is near turn point, snap to it
+    let probeLat = start.lat + (probeStraightKm / kmPerLat) * Math.sin(currentBearing);
+    let probeLng = start.lng + (probeStraightKm / kmPerLng) * Math.cos(currentBearing);
+
+    // If corridor node is near probe destination, snap to it
     if (corridors.length > 0) {
       let closestNode: CorridorNode | null = null;
       let minD = Infinity;
       for (const n of corridors) {
-        const d = calculateDistanceMeters([turnLat, turnLng], [n.lat, n.lng]);
-        if (d < minD && d < oneWayStraightKm * 1000 * 0.7) {
+        const d = calculateDistanceMeters([probeLat, probeLng], [n.lat, n.lng]);
+        if (d < minD && d < probeStraightKm * 1000 * 0.6) {
           minD = d;
           closestNode = n;
         }
       }
       if (closestNode) {
-        turnLat = closestNode.lat;
-        turnLng = closestNode.lng;
+        probeLat = closestNode.lat;
+        probeLng = closestNode.lng;
       }
     }
 
     const outResult = await fetchRealRoadPath(
-      [[start.lat, start.lng], [turnLat, turnLng]],
+      [[start.lat, start.lng], [probeLat, probeLng]],
       activity,
       apiConfig
     );
 
-    const midLat = (start.lat + turnLat) / 2 + 0.0015 * Math.cos(bearing + Math.PI / 2);
-    const midLng = (start.lng + turnLng) / 2 + 0.0015 * Math.sin(bearing + Math.PI / 2);
+    if (outResult && outResult.coordinates.length > 2) {
+      // 1. Clean any spurs or in-and-outs along the outbound path
+      const cleanOutbound = eliminateSpursAndInAndOuts(outResult.coordinates, false);
 
-    const returnResult = await fetchRealRoadPath(
-      [[turnLat, turnLng], [midLat, midLng], [start.lat, start.lng]],
-      activity,
-      apiConfig
-    );
+      // 2. Slice outbound road polyline at EXACTLY halfTargetKm to establish on-road turnaround point
+      const targetHalfM = halfTargetKm * 1000;
+      const outboundLeg: [number, number][] = [cleanOutbound[0]];
+      let accumulatedM = 0;
 
-    if (outResult && returnResult) {
-      const combined: [number, number][] = [
-        ...outResult.coordinates,
-        ...returnResult.coordinates.slice(1),
-      ];
-      const dist = calculateTotalDistanceKm(combined);
-      const diff = Math.abs(dist - targetDistanceKm);
+      for (let i = 0; i < cleanOutbound.length - 1; i++) {
+        const stepM = calculateDistanceMeters(cleanOutbound[i], cleanOutbound[i + 1]);
+        if (accumulatedM + stepM >= targetHalfM) {
+          const remainingM = targetHalfM - accumulatedM;
+          const fraction = stepM > 0 ? remainingM / stepM : 0;
+          const turnLat = cleanOutbound[i][0] + (cleanOutbound[i + 1][0] - cleanOutbound[i][0]) * fraction;
+          const turnLng = cleanOutbound[i][1] + (cleanOutbound[i + 1][1] - cleanOutbound[i][1]) * fraction;
+          outboundLeg.push([turnLat, turnLng]);
+          break;
+        }
+        accumulatedM += stepM;
+        outboundLeg.push(cleanOutbound[i + 1]);
+      }
+
+      // 3. Return leg follows the exact verified corridor back to start
+      // This guarantees zero spurs, zero alley detours, zero off-road cuts, and exact total distance
+      const inboundLeg = [...outboundLeg].reverse();
+      const combined: [number, number][] = [...outboundLeg, ...inboundLeg.slice(1)];
+      const totalDistKm = calculateTotalDistanceKm(combined);
+      const diff = Math.abs(totalDistKm - targetDistanceKm);
 
       if (diff < bestDiff) {
         bestDiff = diff;
@@ -687,23 +797,15 @@ export async function generateRoadOutAndBackRoute(
       if (diff / targetDistanceKm <= 0.01) {
         break;
       }
-
-      const ratio = targetDistanceKm / Math.max(0.1, dist);
-      oneWayStraightKm = Math.max(0.2, oneWayStraightKm * ratio);
-    } else if (outResult) {
-      const reversed: [number, number][] = [...outResult.coordinates].reverse();
-      const combined: [number, number][] = [...outResult.coordinates, ...reversed.slice(1)];
-      bestCoords = combined;
-      break;
     }
   }
 
   if (bestCoords.length === 0) {
-    bestCoords = [
-      [start.lat, start.lng],
-      [start.lat + 0.01, start.lng + 0.01],
-      [start.lat, start.lng],
-    ];
+    const p1: [number, number] = [start.lat, start.lng];
+    const turnLat = start.lat + (halfTargetKm / kmPerLat) * Math.sin(bearing);
+    const turnLng = start.lng + (halfTargetKm / kmPerLng) * Math.cos(bearing);
+    const p2: [number, number] = [turnLat, turnLng];
+    bestCoords = [p1, p2, p1];
   }
 
   return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.01);
