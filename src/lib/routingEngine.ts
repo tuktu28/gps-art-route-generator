@@ -470,8 +470,8 @@ export async function snapWaypointsToRealRoads(
   }
 
   // 2. Primary Strategy: Route the entire sequence in ONE seamless OSRM/ORS call
-  // OSRM easily handles up to 30-40 waypoints in a single query and guarantees unbroken road paths
-  if (cleanWaypoints.length <= 32) {
+  // OSRM easily handles up to 100 waypoints in a single query and guarantees unbroken road paths
+  if (cleanWaypoints.length <= 100) {
     const fullRoadResult = await fetchRealRoadPath(cleanWaypoints, activity, apiConfig, true, allowUTurns);
     if (fullRoadResult && fullRoadResult.coordinates.length >= 2) {
       return fullRoadResult;
@@ -679,52 +679,83 @@ export async function generateRoadGpsArtRoute(
 
   // Calculate box height to match the target distance exactly
   // If base length is 0 (shouldn't happen), default to 0.5km
-  const baseBoxHeightKm = baseGeometricLength > 0 ? targetDistanceKm / baseGeometricLength : 0.5;
-  const charWidthKm = charWidthRatio * baseBoxHeightKm;
-  const spacingKm = spacingRatio * baseBoxHeightKm;
-
-  const heightDeg = baseBoxHeightKm / kmPerLat;
-  const charWidthDeg = charWidthKm / kmPerLng;
-  const spacingDeg = spacingKm / kmPerLng;
-
-  const waypoints: [number, number][] = [];
-  const bottomLat = anchorStart.lat - heightDeg;
-
-  tokens.forEach((char, idx) => {
-    const glyphPoints = CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['O'] || CONTINUOUS_GLYPHS['RUN'];
-    const leftLng = anchorStart.lng + idx * (charWidthDeg + spacingDeg);
-
-    const mappedPoints: [number, number][] = glyphPoints.map(([x, y]) => {
-      const ptLat = bottomLat + y * heightDeg;
-      const ptLng = leftLng + x * charWidthDeg;
-      return [ptLat, ptLng];
-    });
-
-    waypoints.push(...mappedPoints);
-  });
-
-  // 1. Trace the geometric shape securely over the actual street grid using standard OSRM routing
-  // Since we have updated the glyphs to be orthogonal/blocky, OSRM will naturally route them
-  // along standard city grid streets, perfectly recreating the blocky text.
-  const finalCoords: [number, number][] = [];
-  let confidenceScore = 100;
+  // We apply an initial 0.7x factor because real-road routing typically adds 30-40% overhead
+  const initialScale = (baseGeometricLength > 0 ? targetDistanceKm / baseGeometricLength : 0.5) * 0.75;
   
-  try {
-    // allowUTurns = true is critical here: drawing text often requires U-turns to trace lines backward
-    const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig, true);
-    if (snapped && snapped.coordinates.length > 5) {
-      finalCoords.push(...snapped.coordinates);
-      confidenceScore = Math.max(75, Math.min(95, Math.round(100 - tokens.length * 2.5)));
-    } else {
-      finalCoords.push(...waypoints);
+  async function generateAtScale(scale: number): Promise<{coords: [number, number][], routedDist: number}> {
+    const charWidthKm = charWidthRatio * scale;
+    const spacingKm = spacingRatio * scale;
+    const heightDeg = scale / kmPerLat;
+    const charWidthDeg = charWidthKm / kmPerLng;
+    const spacingDeg = spacingKm / kmPerLng;
+
+    const waypoints: [number, number][] = [];
+    const bottomLat = anchorStart.lat - heightDeg;
+
+    tokens.forEach((char, idx) => {
+      const glyphPoints = CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['O'] || CONTINUOUS_GLYPHS['RUN'];
+      const leftLng = anchorStart.lng + idx * (charWidthDeg + spacingDeg);
+
+      const mappedPoints: [number, number][] = glyphPoints.map(([x, y]) => {
+        const ptLat = bottomLat + y * heightDeg;
+        const ptLng = leftLng + x * charWidthDeg;
+        return [ptLat, ptLng];
+      });
+
+      waypoints.push(...mappedPoints);
+    });
+    
+    try {
+      // allowUTurns = true is critical here: drawing text often requires U-turns to trace lines backward
+      const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig, true);
+      if (snapped && snapped.coordinates.length > 5) {
+        return { coords: snapped.coordinates, routedDist: snapped.distanceKm };
+      }
+    } catch (e) {
+      console.warn("GPS Art OSRM snap failed:", e);
     }
-  } catch (e) {
-    console.warn("GPS Art OSRM snap failed, falling back to raw geometry:", e);
-    finalCoords.push(...waypoints);
+    
+    const fallbackDist = calculateTotalDistanceKm(waypoints);
+    return { coords: waypoints, routedDist: fallbackDist };
   }
 
+  // Binary search for the perfect scale
+  let lowScale = 0.05; // 50m minimum
+  let highScale = initialScale * 2.0;
+  let currentScale = initialScale;
+  let result = await generateAtScale(currentScale);
+  let passes = 1;
+  let bestResult = result;
+  let bestDiff = Math.abs(result.routedDist - targetDistanceKm);
+
+  // Correction loop (up to 6 passes for binary search)
+  while (passes <= 6 && bestDiff > targetDistanceKm * 0.15) {
+    if (result.routedDist > targetDistanceKm) {
+      highScale = currentScale;
+    } else if (result.routedDist > 0) {
+      lowScale = currentScale;
+    }
+
+    currentScale = (lowScale + highScale) / 2.0;
+    
+    const nextResult = await generateAtScale(currentScale);
+    if (nextResult.coords.length > 0) {
+      result = nextResult;
+      const diff = Math.abs(result.routedDist - targetDistanceKm);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestResult = result;
+      }
+    } else {
+      break;
+    }
+    passes++;
+  }
+
+  let confidenceScore = Math.max(75, Math.min(95, Math.round(100 - tokens.length * 2.5)));
+
   return {
-    coordinates: finalCoords,
+    coordinates: bestResult.coords,
     confidenceScore,
   };
 }
