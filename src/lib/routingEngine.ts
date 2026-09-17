@@ -11,7 +11,6 @@ import {
   RouteType,
 } from '../types/route';
 import { CONTINUOUS_GLYPHS, GLYPH_STROKES } from './glyphEngine';
-import { snapGpsArtToGraph } from './artGraphEngine';
 
 // Earth radius in meters
 const EARTH_RADIUS_M = 6371000;
@@ -301,7 +300,8 @@ export async function fetchRealRoadPath(
   waypoints: [number, number][],
   activity: ActivityType,
   apiConfig?: ApiConfiguration,
-  skipSpurPruning: boolean = false
+  skipSpurPruning: boolean = false,
+  allowUTurns: boolean = false
 ): Promise<{ coordinates: [number, number][]; distanceKm: number } | null> {
   if (waypoints.length < 2) return null;
 
@@ -369,18 +369,18 @@ export async function fetchRealRoadPath(
   const coordString = waypoints.map(([lat, lng]) => `${lng.toFixed(6)},${lat.toFixed(6)}`).join(';');
 
   // Profiles based on activity: routed-foot prioritizes footways, sidewalks, cycleways, parks, and calm paths
-  // &continue_straight=true prevents erratic turnaround detours into side streets
+  const continueStraight = allowUTurns ? '' : '&continue_straight=true';
   const osrmEndpoints =
     activity === 'bike'
       ? [
-          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
-          `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
-          `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
+          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson${continueStraight}`,
+          `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson${continueStraight}`,
+          `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson${continueStraight}`,
         ]
       : [
-          `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
-          `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
-          `https://router.project-osrm.org/route/v1/walking/${coordString}?overview=full&geometries=geojson&continue_straight=true`,
+          `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson${continueStraight}`,
+          `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson${continueStraight}`,
+          `https://router.project-osrm.org/route/v1/walking/${coordString}?overview=full&geometries=geojson${continueStraight}`,
         ];
 
   for (const url of osrmEndpoints) {
@@ -448,7 +448,8 @@ export async function snapPointToNearestRoad(
 export async function snapWaypointsToRealRoads(
   waypoints: [number, number][],
   activity: ActivityType,
-  apiConfig?: ApiConfiguration
+  apiConfig?: ApiConfiguration,
+  allowUTurns: boolean = false
 ): Promise<{ coordinates: [number, number][]; distanceKm: number }> {
   if (waypoints.length < 2) {
     return { coordinates: waypoints, distanceKm: 0 };
@@ -471,7 +472,7 @@ export async function snapWaypointsToRealRoads(
   // 2. Primary Strategy: Route the entire sequence in ONE seamless OSRM/ORS call
   // OSRM easily handles up to 30-40 waypoints in a single query and guarantees unbroken road paths
   if (cleanWaypoints.length <= 32) {
-    const fullRoadResult = await fetchRealRoadPath(cleanWaypoints, activity, apiConfig, true);
+    const fullRoadResult = await fetchRealRoadPath(cleanWaypoints, activity, apiConfig, true, allowUTurns);
     if (fullRoadResult && fullRoadResult.coordinates.length >= 2) {
       return fullRoadResult;
     }
@@ -485,20 +486,20 @@ export async function snapWaypointsToRealRoads(
     const chunk = cleanWaypoints.slice(i, Math.min(cleanWaypoints.length, i + chunkSize));
     if (chunk.length < 2) break;
 
-    let roadResult = await fetchRealRoadPath(chunk, activity, apiConfig, true);
+    let roadResult = await fetchRealRoadPath(chunk, activity, apiConfig, true, allowUTurns);
 
     // If chunk failed, attempt point-to-point sub-segment routing on real streets
     if (!roadResult || roadResult.coordinates.length < 2) {
       const subCoords: [number, number][] = [];
       for (let j = 0; j < chunk.length - 1; j++) {
         const segPair = [chunk[j], chunk[j + 1]];
-        let segResult = await fetchRealRoadPath(segPair, activity, apiConfig, true);
+        let segResult = await fetchRealRoadPath(segPair, activity, apiConfig, true, allowUTurns);
 
         // If direct pair failed, snap both points to nearest OSM road node first
         if (!segResult || segResult.coordinates.length < 2) {
           const snappedA = await snapPointToNearestRoad(chunk[j][0], chunk[j][1], activity);
           const snappedB = await snapPointToNearestRoad(chunk[j + 1][0], chunk[j + 1][1], activity);
-          segResult = await fetchRealRoadPath([snappedA, snappedB], activity, apiConfig, true);
+          segResult = await fetchRealRoadPath([snappedA, snappedB], activity, apiConfig, true, allowUTurns);
         }
 
         if (segResult && segResult.coordinates.length >= 2) {
@@ -702,23 +703,24 @@ export async function generateRoadGpsArtRoute(
     waypoints.push(...mappedPoints);
   });
 
-  // 1. Trace the geometric shape securely over the actual street grid using our dedicated A* graph engine
-  // This heavily penalizes deviations from the shape, so we get the best possible real-road approximation 
-  // without OSRM creating wild zigzag loops.
-  let finalCoords = waypoints;
+  // 1. Trace the geometric shape securely over the actual street grid using standard OSRM routing
+  // Since we have updated the glyphs to be orthogonal/blocky, OSRM will naturally route them
+  // along standard city grid streets, perfectly recreating the blocky text.
+  const finalCoords: [number, number][] = [];
   let confidenceScore = 100;
   
   try {
-    const artGraphResult = await snapGpsArtToGraph(waypoints, activity);
-    if (artGraphResult && artGraphResult.coordinates.length > 5) {
-      finalCoords = artGraphResult.coordinates;
-      // We calculate a realistic confidence based on how much it had to deviate from the raw lines
+    // allowUTurns = true is critical here: drawing text often requires U-turns to trace lines backward
+    const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig, true);
+    if (snapped && snapped.coordinates.length > 5) {
+      finalCoords.push(...snapped.coordinates);
       confidenceScore = Math.max(75, Math.min(95, Math.round(100 - tokens.length * 2.5)));
+    } else {
+      finalCoords.push(...waypoints);
     }
   } catch (e) {
-    // If graph building fails (e.g. Overpass API timeout or remote region), gracefully degrade
-    // to raw geometry rather than totally breaking
-    console.warn("GPS Art A* graph failed, falling back to raw geometry:", e);
+    console.warn("GPS Art OSRM snap failed, falling back to raw geometry:", e);
+    finalCoords.push(...waypoints);
   }
 
   return {
