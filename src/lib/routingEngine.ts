@@ -11,6 +11,7 @@ import {
   RouteType,
 } from '../types/route';
 import { CONTINUOUS_GLYPHS, GLYPH_STROKES } from './glyphEngine';
+import { snapGpsArtToGraph } from './artGraphEngine';
 
 // Earth radius in meters
 const EARTH_RADIUS_M = 6371000;
@@ -681,9 +682,22 @@ export async function generateRoadGpsArtRoute(
     waypoints.push(...mappedPoints);
   });
 
-  // Snap the geometric stroke waypoints to real streets, greenways, and cycleways
-  const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig);
-  let finalCoords = snapped.coordinates;
+  // 1. Try our custom shape-tracing A* engine which forces the path to hug the geometric shape strictly on real roads
+  let finalCoords: [number, number][] = [];
+  try {
+    const artGraphResult = await snapGpsArtToGraph(waypoints, activity);
+    if (artGraphResult && artGraphResult.coordinates.length > 5) {
+      finalCoords = artGraphResult.coordinates;
+    }
+  } catch (e) {
+    // silently fail back to standard routing
+  }
+
+  // 2. Fallback to standard OSRM-based point-to-point road snapping if the graph engine fails
+  if (finalCoords.length === 0) {
+    const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig);
+    finalCoords = snapped.coordinates;
+  }
 
   const confidenceScore = Math.max(78, Math.min(98, Math.round(96 - tokens.length * 1.5)));
 
