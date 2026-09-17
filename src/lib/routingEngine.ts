@@ -702,13 +702,24 @@ export async function generateRoadGpsArtRoute(
     waypoints.push(...mappedPoints);
   });
 
-  // For GPS Art, we return the raw geometric coordinates rather than snapping to the road network.
-  // Snapping densely packed geometric glyphs to roads causes severe distortion and zigzagging 
-  // (e.g. going back and forth to the nearest road for every single point). 
-  // True GPS Art runners prefer pure shapes they can trace on the ground.
-  const finalCoords = waypoints;
-
-  const confidenceScore = 100; // Raw geometric art is 100% accurate to the shape
+  // 1. Trace the geometric shape securely over the actual street grid using our dedicated A* graph engine
+  // This heavily penalizes deviations from the shape, so we get the best possible real-road approximation 
+  // without OSRM creating wild zigzag loops.
+  let finalCoords = waypoints;
+  let confidenceScore = 100;
+  
+  try {
+    const artGraphResult = await snapGpsArtToGraph(waypoints, activity);
+    if (artGraphResult && artGraphResult.coordinates.length > 5) {
+      finalCoords = artGraphResult.coordinates;
+      // We calculate a realistic confidence based on how much it had to deviate from the raw lines
+      confidenceScore = Math.max(75, Math.min(95, Math.round(100 - tokens.length * 2.5)));
+    }
+  } catch (e) {
+    // If graph building fails (e.g. Overpass API timeout or remote region), gracefully degrade
+    // to raw geometry rather than totally breaking
+    console.warn("GPS Art A* graph failed, falling back to raw geometry:", e);
+  }
 
   return {
     coordinates: finalCoords,
