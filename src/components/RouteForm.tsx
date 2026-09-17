@@ -414,7 +414,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
       </div>
 
       {/* 4. CONDITIONAL LOGIC: GPS Art Text Input & Controls */}
-      {routeType === 'gps_art' ? (
+      {routeType === 'gps_art' && (
         <div className="p-3.5 rounded-2xl bg-[#8A4A72]/10 dark:bg-[#8A4A72]/20 border border-[#8A4A72]/30 flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-[#8A4A72] dark:text-[#E1B8D4] flex items-center justify-between">
@@ -480,22 +480,15 @@ export const RouteForm: React.FC<RouteFormProps> = ({
               ))}
             </div>
           </div>
-
-          {/* Smart Alignment & Unrestricted Geometry Note */}
-          <div className="p-2.5 rounded-xl bg-[#8A4A72]/15 dark:bg-[#8A4A72]/30 border border-[#8A4A72]/30 text-[11px] text-stone-700 dark:text-stone-300 flex items-start gap-2">
-            <Sparkles className="w-3.5 h-3.5 text-[#8A4A72] dark:text-[#E1B8D4] shrink-0 mt-0.5" />
-            <p className="leading-relaxed">
-              <strong className="text-[#8A4A72] dark:text-[#E1B8D4]">Optimal Placement:</strong> Art starts near your location pin or snaps to the cleanest nearby road intersection for crisp, distortion-free lines without mileage restrictions.
-            </p>
-          </div>
         </div>
-      ) : (
-        /* 5. Target Distance: Only shown for standard Loop and Out & Back routes */
-        <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
-          <div className="flex items-center justify-between">
-            <label htmlFor="target-distance-input" className="text-xs font-semibold text-stone-700 dark:text-stone-300">
-              Target Distance
-            </label>
+      )}
+
+      {/* 5. Target Distance: Now shown for all route types */}
+      <div className="flex flex-col gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm">
+        <div className="flex items-center justify-between">
+          <label htmlFor="target-distance-input" className="text-xs font-semibold text-stone-700 dark:text-stone-300">
+            Target Distance
+          </label>
             <div className="flex items-center rounded-lg bg-[#F4EFE6] dark:bg-[#121614] p-0.5 border border-[#E5DFD3] dark:border-[#2E3C34]">
               <button
                 type="button"
@@ -580,7 +573,6 @@ export const RouteForm: React.FC<RouteFormProps> = ({
             ))}
           </div>
         </div>
-      )}
       </div>
 
       {/* Generate Route CTA Button */}
