@@ -604,6 +604,7 @@ export function enforceDistanceTolerance(
 export async function generateRoadGpsArtRoute(
   start: LatLng,
   text: string,
+  targetDistanceKm: number,
   activity: ActivityType,
   apiConfig?: ApiConfiguration
 ): Promise<{ coordinates: [number, number][]; confidenceScore: number }> {
@@ -656,17 +657,36 @@ export async function generateRoadGpsArtRoute(
   const kmPerLat = 111.0;
   const kmPerLng = 111.0 * Math.cos(latRad);
 
-  // Determine natural readable scale without arbitrary user restrictions
-  const baseBoxHeightKm = activity === 'bike' ? 0.75 : activity === 'hike' ? 0.35 : 0.45;
-  const charWidthKm = isSpecialShape ? baseBoxHeightKm * 1.15 : baseBoxHeightKm * 0.75;
-  const spacingKm = baseBoxHeightKm * 0.25;
+  // Determine natural readable scale based on requested distance
+  const charWidthRatio = isSpecialShape ? 1.15 : 0.75;
+  const heightRatio = 1.0;
+  const spacingRatio = 0.25;
+
+  let baseGeometricLength = 0;
+  let lastPt: [number, number] | null = null;
+  tokens.forEach((char, idx) => {
+    const glyphPoints = CONTINUOUS_GLYPHS[char] || CONTINUOUS_GLYPHS['O'] || CONTINUOUS_GLYPHS['RUN'];
+    const leftX = idx * (charWidthRatio + spacingRatio);
+    const mappedPoints = glyphPoints.map(([x, y]) => [leftX + x * charWidthRatio, y * heightRatio] as [number, number]);
+    for (let i = 0; i < mappedPoints.length; i++) {
+      if (lastPt) {
+        baseGeometricLength += Math.hypot(mappedPoints[i][0] - lastPt[0], mappedPoints[i][1] - lastPt[1]);
+      }
+      lastPt = mappedPoints[i];
+    }
+  });
+
+  // Calculate box height to match the target distance exactly
+  // If base length is 0 (shouldn't happen), default to 0.5km
+  const baseBoxHeightKm = baseGeometricLength > 0 ? targetDistanceKm / baseGeometricLength : 0.5;
+  const charWidthKm = charWidthRatio * baseBoxHeightKm;
+  const spacingKm = spacingRatio * baseBoxHeightKm;
 
   const heightDeg = baseBoxHeightKm / kmPerLat;
   const charWidthDeg = charWidthKm / kmPerLng;
   const spacingDeg = spacingKm / kmPerLng;
 
   const waypoints: [number, number][] = [];
-  const topLat = anchorStart.lat;
   const bottomLat = anchorStart.lat - heightDeg;
 
   tokens.forEach((char, idx) => {
@@ -682,24 +702,13 @@ export async function generateRoadGpsArtRoute(
     waypoints.push(...mappedPoints);
   });
 
-  // 1. Try our custom shape-tracing A* engine which forces the path to hug the geometric shape strictly on real roads
-  let finalCoords: [number, number][] = [];
-  try {
-    const artGraphResult = await snapGpsArtToGraph(waypoints, activity);
-    if (artGraphResult && artGraphResult.coordinates.length > 5) {
-      finalCoords = artGraphResult.coordinates;
-    }
-  } catch (e) {
-    // silently fail back to standard routing
-  }
+  // For GPS Art, we return the raw geometric coordinates rather than snapping to the road network.
+  // Snapping densely packed geometric glyphs to roads causes severe distortion and zigzagging 
+  // (e.g. going back and forth to the nearest road for every single point). 
+  // True GPS Art runners prefer pure shapes they can trace on the ground.
+  const finalCoords = waypoints;
 
-  // 2. Fallback to standard OSRM-based point-to-point road snapping if the graph engine fails
-  if (finalCoords.length === 0) {
-    const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig);
-    finalCoords = snapped.coordinates;
-  }
-
-  const confidenceScore = Math.max(78, Math.min(98, Math.round(96 - tokens.length * 1.5)));
+  const confidenceScore = 100; // Raw geometric art is 100% accurate to the shape
 
   return {
     coordinates: finalCoords,
@@ -1178,6 +1187,7 @@ export async function generateFullRoute(params: {
     const artResult = await generateRoadGpsArtRoute(
       startLocation,
       gpsArtText || 'RUN',
+      targetDistanceKm,
       activity,
       apiConfig
     );
