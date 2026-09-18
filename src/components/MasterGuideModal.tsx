@@ -74,8 +74,8 @@ export const MasterGuideModal: React.FC<MasterGuideModalProps> = ({ isOpen, onCl
       desc: 'Type any word (e.g., "RUN", "HEART", "DOG") to automatically synthesize path geometries onto matching streets.',
     },
     {
-      title: 'Interactive Map Pin',
-      desc: 'Click anywhere on the map at any time to instantly reposition your starting trailhead.',
+      title: 'Safety-First Crossings',
+      desc: 'Major road intersections prioritize traffic signals and marked crosswalks within a 5% calibration mandate, with automated fallback.',
     },
     {
       title: 'Elevation Sync',

@@ -575,6 +575,16 @@ export const RouteForm: React.FC<RouteFormProps> = ({
         </div>
       </div>
 
+      {/* Safety-Conscious Routing Guarantee Notice */}
+      {(routeType === 'loop' || routeType === 'out_and_back') && (
+        <div className="flex items-start gap-2 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-[11px] text-emerald-900 dark:text-emerald-200">
+          <Shield className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+          <span>
+            <strong>Safety-First Road Crossings:</strong> Arterial crossings are routed through signalized intersections and protected crosswalks within a 5% distance calibration mandate, with automated fallback to standard geometry if signals are unavailable.
+          </span>
+        </div>
+      )}
+
       {/* Generate Route CTA Button */}
       <button
         type="submit"

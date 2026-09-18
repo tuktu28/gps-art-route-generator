@@ -146,6 +146,7 @@ export const Map: React.FC<MapProps> = ({
   const hoverMarkerRef = useRef<L.CircleMarker | null>(null);
   const clickMarkerRef = useRef<L.Marker | null>(null);
   const directionalMarkersRef = useRef<L.Marker[]>([]);
+  const safeCrossingMarkersRef = useRef<L.Marker[]>([]);
 
   const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'outdoors');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -314,6 +315,8 @@ export const Map: React.FC<MapProps> = ({
     if (endMarkerRef.current) map.removeLayer(endMarkerRef.current);
     directionalMarkersRef.current.forEach((m) => map.removeLayer(m));
     directionalMarkersRef.current = [];
+    safeCrossingMarkersRef.current.forEach((m) => map.removeLayer(m));
+    safeCrossingMarkersRef.current = [];
 
     if (!route || route.coordinates.length === 0) return;
 
@@ -468,6 +471,47 @@ export const Map: React.FC<MapProps> = ({
             <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-1">Distance: ${route.stats.distanceKm} km</p>
           </div>`
         );
+    }
+
+    // Render Controlled Safe Crossings (Traffic Lights / Stop Signs)
+    if (route.safeCrossings && route.safeCrossings.length > 0) {
+      route.safeCrossings.forEach((crossing, idx) => {
+        const isLight = crossing.type === 'traffic_signals';
+        const isStop = crossing.type === 'stop';
+        const badgeBg = isLight ? '#10B981' : isStop ? '#EF4444' : '#3B82F6';
+        const iconSvg = isLight
+          ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="12" height="20" x="6" y="2" rx="3"/><circle cx="12" cy="7" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="17" r="1.5" fill="currentColor"/></svg>`
+          : isStop
+          ? `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
+          : `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`;
+
+        const crossingIcon = L.divIcon({
+          className: 'safe-crossing-marker',
+          html: `
+            <div class="relative group cursor-pointer flex items-center justify-center">
+              <div style="background-color: ${badgeBg};" class="w-5 h-5 rounded-full border-2 border-white dark:border-stone-900 shadow-md flex items-center justify-center text-white">
+                ${iconSvg}
+              </div>
+            </div>
+          `,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10],
+        });
+
+        const crossingMarker = L.marker([crossing.lat, crossing.lng], { icon: crossingIcon })
+          .addTo(map)
+          .bindPopup(
+            `<div class="p-1 font-sans">
+              <div class="flex items-center gap-1.5 font-bold text-xs ${isLight ? 'text-emerald-600' : isStop ? 'text-rose-600' : 'text-blue-600'}">
+                <span>${isLight ? '🚦 Controlled Intersection' : isStop ? '🛑 Stop-Sign Crossing' : '🚶 Safe Pedestrian Crossing'}</span>
+              </div>
+              <p class="text-[11px] font-medium text-stone-700 dark:text-stone-200 mt-1">${crossing.roadName || crossing.name || 'Verified Safe Crossing'}</p>
+              <p class="text-[10px] text-stone-500 mt-0.5">Route prioritized for pedestrian & cyclist safety</p>
+            </div>`
+          );
+
+        safeCrossingMarkersRef.current.push(crossingMarker);
+      });
     }
 
     // Smoothly fit map bounds
