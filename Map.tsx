@@ -55,6 +55,7 @@ interface TileLayerConfig {
   url: string;
   attribution: string;
   subdomains?: string[];
+  maxNativeZoom?: number;
   fallbackUrl?: string;
   fallbackAttribution?: string;
 }
@@ -76,22 +77,22 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         badge: 'Esri Topo',
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
         attribution: '&copy; Esri, HERE, Garmin, USGS',
-        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        fallbackAttribution: '&copy; OpenStreetMap contributors',
+        fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        fallbackAttribution: '&copy; Esri, DeLorme, NAVTEQ',
       },
   topo: {
     name: 'Topographic Contours',
     badge: 'Esri Topo',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
     attribution: '&copy; Esri, DeLorme, NAVTEQ, USGS',
-    fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    fallbackAttribution: '&copy; OpenStreetMap contributors',
+    fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
   },
   osm: {
-    name: 'OpenStreetMap Standard',
-    badge: 'OSM',
-    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+    name: 'Street Map Standard',
+    badge: 'Esri Streets',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; <a href="https://www.esri.com/">Esri</a>, HERE, Garmin, USGS',
     fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
     fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
   },
@@ -102,6 +103,7 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         url: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`,
         attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
         subdomains: ['a', 'b', 'c', 'd'],
+        maxNativeZoom: 19,
         fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
         fallbackAttribution: '&copy; Esri, DeLorme, NAVTEQ',
       }
@@ -110,8 +112,9 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         badge: 'Esri Canvas',
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
         attribution: '&copy; Esri, DeLorme, NAVTEQ',
-        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        fallbackAttribution: '&copy; OpenStreetMap contributors',
+        maxNativeZoom: 16,
+        fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
       },
   dark: HAS_CARTO_KEY
     ? {
@@ -120,6 +123,7 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`,
         attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
         subdomains: ['a', 'b', 'c', 'd'],
+        maxNativeZoom: 19,
         fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
         fallbackAttribution: '&copy; Esri, DeLorme, NAVTEQ',
       }
@@ -128,8 +132,9 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         badge: 'Esri Canvas',
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
         attribution: '&copy; Esri, DeLorme, NAVTEQ',
-        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        fallbackAttribution: '&copy; OpenStreetMap contributors',
+        maxNativeZoom: 16,
+        fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+        fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
       },
   satellite: {
     name: 'Satellite View',
@@ -179,6 +184,7 @@ export const Map: React.FC<MapProps> = ({
       attribution: config.attribution,
       subdomains: config.subdomains || ['a', 'b', 'c', 'd'],
       maxZoom: 19,
+      maxNativeZoom: config.maxNativeZoom ?? 19,
     });
 
     if (config.fallbackUrl) {
