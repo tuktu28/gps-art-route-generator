@@ -27,6 +27,15 @@ export interface RouteStats {
   turnCount: number;
   highestPointM: number;
   lowestPointM: number;
+  safeCrossingCount?: number;
+}
+
+export interface SafeCrossing {
+  lat: number;
+  lng: number;
+  type: 'traffic_signals' | 'stop' | 'marked_crossing';
+  name?: string;
+  roadName?: string;
 }
 
 export interface PrivacyMaskInfo {
@@ -49,6 +58,7 @@ export interface GeneratedRoute {
   elevationProfile: ElevationPoint[];
   stats: RouteStats;
   privacy: PrivacyMaskInfo;
+  safeCrossings?: SafeCrossing[];
   terrainFocus?: string;
   surfaceType?: string;
   createdAt: string;
