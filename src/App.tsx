@@ -21,6 +21,7 @@ import {
   Flame,
   Moon,
   Mountain,
+  ShieldCheck,
   Sparkles,
   Sun,
 } from 'lucide-react';
@@ -259,6 +260,15 @@ export default function App() {
                   <span className="font-semibold text-[#2D4F3E] dark:text-[#7EB89B]">{currentRoute.terrainFocus}</span>
                 </div>
               )}
+
+              {currentRoute?.safeCrossings && currentRoute.safeCrossings.length > 0 && (
+                <div className="px-2.5 py-1 rounded-full bg-emerald-50/95 dark:bg-emerald-950/90 border border-emerald-300 dark:border-emerald-700 shadow-md backdrop-blur-sm text-[10px] font-mono text-emerald-800 dark:text-emerald-200 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span className="font-semibold">
+                    {currentRoute.safeCrossings.length} Controlled {currentRoute.safeCrossings.length === 1 ? 'Crossing' : 'Crossings'}
+                  </span>
+                </div>
+              )}
             </div>
 
             <Map
@@ -276,7 +286,7 @@ export default function App() {
               id="route-telemetry-bar"
               className="p-4 rounded-2xl bg-white dark:bg-[#19201D] border border-[#E5DFD3] dark:border-[#2E3C34] shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-colors"
             >
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 w-full sm:w-auto font-mono text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 w-full sm:w-auto font-mono text-xs">
                 {/* Distance */}
                 <div className="flex flex-col">
                   <span className="text-[10px] text-stone-500 uppercase tracking-wider">Distance</span>
@@ -301,6 +311,15 @@ export default function App() {
                   <span className="text-base font-bold text-stone-800 dark:text-stone-100 flex items-center gap-1">
                     <Mountain className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B]" />
                     +{currentRoute.stats.elevationGainM}m
+                  </span>
+                </div>
+
+                {/* Controlled Crossings */}
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-stone-500 uppercase tracking-wider">Safe Crossings</span>
+                  <span className="text-base font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    {currentRoute.stats.safeCrossingCount ?? currentRoute.safeCrossings?.length ?? 0} Protected
                   </span>
                 </div>
 
