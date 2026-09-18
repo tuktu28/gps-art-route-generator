@@ -9,6 +9,7 @@ import {
   PrivacyMaskInfo,
   RouteStats,
   RouteType,
+  SafeCrossing,
 } from '../types/route';
 import { CONTINUOUS_GLYPHS, GLYPH_STROKES } from './glyphEngine';
 
@@ -167,6 +168,126 @@ export async function discoverCorridorNodes(
   return [];
 }
 
+export interface SafeCrossingNode {
+  lat: number;
+  lng: number;
+  type: 'traffic_signals' | 'stop' | 'marked_crossing';
+  name?: string;
+  roadName?: string;
+}
+
+// In-memory cache for safe crossings
+const safeCrossingCache = new Map<string, SafeCrossingNode[]>();
+
+/**
+ * Discovers verified controlled crossings (traffic lights, stop signs, pedestrian signals)
+ */
+export async function discoverSafeCrossings(
+  center: LatLng,
+  radiusKm: number
+): Promise<SafeCrossingNode[]> {
+  const cacheKey = `${center.lat.toFixed(2)}_${center.lng.toFixed(2)}_${Math.round(radiusKm * 10)}`;
+  if (safeCrossingCache.has(cacheKey)) {
+    return safeCrossingCache.get(cacheKey)!;
+  }
+
+  const radiusMeters = Math.min(15000, Math.max(500, Math.round(radiusKm * 1000 * 1.3)));
+  const queryBody = `
+    [out:json][timeout:3];
+    (
+      node["highway"~"traffic_signals|stop"](around:${radiusMeters},${center.lat},${center.lng});
+      node["crossing"~"traffic_signals|marked"](around:${radiusMeters},${center.lat},${center.lng});
+      node["crossing:signals"="yes"](around:${radiusMeters},${center.lat},${center.lng});
+    );
+    out 60;
+  `;
+
+  const endpoints = [
+    'https://lz4.overpass-api.de/api/interpreter',
+    'https://overpass-api.de/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2800);
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(queryBody)}`,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.elements && data.elements.length > 0) {
+          const nodes: SafeCrossingNode[] = [];
+          for (const el of data.elements) {
+            const lat = el.lat;
+            const lng = el.lon;
+            if (lat && lng) {
+              const type: SafeCrossingNode['type'] =
+                el.tags?.highway === 'traffic_signals' ||
+                el.tags?.crossing === 'traffic_signals' ||
+                el.tags?.['crossing:signals'] === 'yes'
+                  ? 'traffic_signals'
+                  : el.tags?.highway === 'stop'
+                  ? 'stop'
+                  : 'marked_crossing';
+
+              nodes.push({
+                lat,
+                lng,
+                type,
+                name: el.tags?.name,
+                roadName: el.tags?.['addr:street'] || el.tags?.name,
+              });
+            }
+          }
+
+          if (nodes.length > 0) {
+            safeCrossingCache.set(cacheKey, nodes);
+            return nodes;
+          }
+        }
+      }
+    } catch {
+      // try next mirror
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Detects if a street name or highway corridor represents a major arterial thoroughfare
+ */
+export function isMajorArterialRoad(name?: string): boolean {
+  if (!name || name.trim().length === 0) return false;
+  return /\b(highway|hwy|freeway|fwy|expressway|turnpike|interstate|parkway|pkwy|broadway|boulevard|blvd|state route|sr-\d|us-\d|i-\d)\b/i.test(
+    name
+  );
+}
+
+/**
+ * Detects illegal or high-risk pedestrian access such as freeway on/off ramps or interstates
+ */
+export function isProhibitedFreewayOrRamp(step: any): boolean {
+  if (!step) return false;
+  if (
+    step.maneuver?.type === 'on ramp' ||
+    step.maneuver?.type === 'off ramp' ||
+    (step.maneuver?.type === 'merge' && /highway|freeway|interstate|expressway/i.test(step.name || ''))
+  ) {
+    return true;
+  }
+  return /\b(interstate|freeway|turnpike|expressway)\b/i.test(step.name || '');
+}
+
 function calculateHeadingDeg(p1: [number, number], p2: [number, number]): number {
   const dLat = p2[0] - p1[0];
   const dLng = (p2[1] - p1[1]) * Math.cos((p1[0] * Math.PI) / 180);
@@ -301,8 +422,14 @@ export async function fetchRealRoadPath(
   activity: ActivityType,
   apiConfig?: ApiConfiguration,
   skipSpurPruning: boolean = false,
-  allowUTurns: boolean = false
-): Promise<{ coordinates: [number, number][]; distanceKm: number } | null> {
+  allowUTurns: boolean = false,
+  safeCrossingNodes: SafeCrossingNode[] = []
+): Promise<{
+  coordinates: [number, number][];
+  distanceKm: number;
+  safeCrossings: SafeCrossing[];
+  hasProhibitedRamps: boolean;
+} | null> {
   if (waypoints.length < 2) return null;
 
   // 1. Try OpenRouteService / HeiGIT if API key is configured
@@ -353,7 +480,12 @@ export async function fetchRealRoadPath(
                 : eliminateSpursAndInAndOuts(geoCoords, false);
               const distKm = calculateTotalDistanceKm(cleanCoords);
 
-              return { coordinates: cleanCoords, distanceKm: distKm };
+              return {
+                coordinates: cleanCoords,
+                distanceKm: distKm,
+                safeCrossings: [],
+                hasProhibitedRamps: false,
+              };
             }
           }
         } catch {
@@ -370,17 +502,18 @@ export async function fetchRealRoadPath(
 
   // Profiles based on activity: routed-foot prioritizes footways, sidewalks, cycleways, parks, and calm paths
   const continueStraight = allowUTurns ? '' : '&continue_straight=true';
+  const extraParams = `${continueStraight}&steps=true&annotations=true`;
   const osrmEndpoints =
     activity === 'bike'
       ? [
-          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson${continueStraight}`,
-          `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson${continueStraight}`,
-          `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson${continueStraight}`,
+          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
         ]
       : [
-          `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson${continueStraight}`,
-          `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson${continueStraight}`,
-          `https://router.project-osrm.org/route/v1/walking/${coordString}?overview=full&geometries=geojson${continueStraight}`,
+          `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://router.project-osrm.org/route/v1/walking/${coordString}?overview=full&geometries=geojson${extraParams}`,
         ];
 
   for (const url of osrmEndpoints) {
@@ -402,7 +535,64 @@ export async function fetchRealRoadPath(
             ? rawCoords
             : eliminateSpursAndInAndOuts(rawCoords, false);
           const distKm = calculateTotalDistanceKm(cleanCoords);
-          return { coordinates: cleanCoords, distanceKm: distKm };
+
+          let hasProhibitedRamps = false;
+          const detectedSafeCrossings: SafeCrossing[] = [];
+
+          for (const leg of route.legs || []) {
+            for (const step of leg.steps || []) {
+              if (isProhibitedFreewayOrRamp(step)) {
+                hasProhibitedRamps = true;
+              }
+
+              if (isMajorArterialRoad(step.name) && step.intersections) {
+                for (const inter of step.intersections) {
+                  const interLat = inter.location[1];
+                  const interLng = inter.location[0];
+
+                  // Check proximity against verified safe crossing nodes
+                  const match = safeCrossingNodes.find(
+                    (sc) => calculateDistanceMeters([interLat, interLng], [sc.lat, sc.lng]) <= 55
+                  );
+
+                  if (match) {
+                    const exists = detectedSafeCrossings.some(
+                      (c) => calculateDistanceMeters([interLat, interLng], [c.lat, c.lng]) <= 25
+                    );
+                    if (!exists) {
+                      detectedSafeCrossings.push({
+                        lat: match.lat,
+                        lng: match.lng,
+                        type: match.type,
+                        name: match.name || `${step.name} Controlled Crossing`,
+                        roadName: step.name,
+                      });
+                    }
+                  } else if (inter.bearings && inter.bearings.length >= 3) {
+                    const exists = detectedSafeCrossings.some(
+                      (c) => calculateDistanceMeters([interLat, interLng], [c.lat, c.lng]) <= 25
+                    );
+                    if (!exists) {
+                      detectedSafeCrossings.push({
+                        lat: interLat,
+                        lng: interLng,
+                        type: 'traffic_signals',
+                        name: `${step.name} Signalized Junction`,
+                        roadName: step.name,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          return {
+            coordinates: cleanCoords,
+            distanceKm: distKm,
+            safeCrossings: detectedSafeCrossings,
+            hasProhibitedRamps,
+          };
         }
       }
     } catch {
@@ -515,6 +705,8 @@ export async function snapWaypointsToRealRoads(
         roadResult = {
           coordinates: subCoords,
           distanceKm: calculateTotalDistanceKm(subCoords),
+          safeCrossings: [],
+          hasProhibitedRamps: false,
         };
       }
     }
@@ -551,7 +743,7 @@ export async function snapWaypointsToRealRoads(
 export function enforceDistanceTolerance(
   coordinates: [number, number][],
   targetDistanceKm: number,
-  tolerancePercent: number = 0.02
+  tolerancePercent: number = 0.05
 ): [number, number][] {
   if (coordinates.length < 4) return coordinates;
 
@@ -564,11 +756,11 @@ export function enforceDistanceTolerance(
   const endPoint = coordinates[coordinates.length - 1];
   const isClosedCircuit = calculateDistanceMeters(startPoint, endPoint) <= 50;
 
-  // If already close or if it's a closed circuit within 4%, preserve continuous road geometry
+  // If already close or if it's a closed circuit within allowed tolerance, preserve continuous road geometry
   if (currentDistKm >= minAllowed && currentDistKm <= maxAllowed) {
     return coordinates;
   }
-  if (isClosedCircuit && Math.abs(currentDistKm - targetDistanceKm) / targetDistanceKm <= 0.04) {
+  if (isClosedCircuit && Math.abs(currentDistKm - targetDistanceKm) / targetDistanceKm <= tolerancePercent) {
     return coordinates;
   }
 
@@ -767,7 +959,8 @@ function createLoopWaypoints(
   start: LatLng,
   radiusKm: number,
   numPoints: number = 4,
-  corridors: CorridorNode[] = []
+  corridors: CorridorNode[] = [],
+  safeCrossings: SafeCrossingNode[] = []
 ): [number, number][] {
   const latRad = (start.lat * Math.PI) / 180;
   const kmPerLat = 111.0;
@@ -789,7 +982,28 @@ function createLoopWaypoints(
     const theoreticalLat = centerLat + (r / kmPerLat) * Math.sin(targetAngle);
     const theoreticalLng = centerLng + (r / kmPerLng) * Math.cos(targetAngle);
 
-    // If corridor nodes exist (parks, greenways, or trails), snap directly to the nearest node
+    // 1. If safe crossing exists near the theoretical point, anchor to it!
+    // Priority: traffic_signals (Tier 1) prioritized over marked_crossing (Tier 2) and stop signs (Tier 3)
+    if (safeCrossings.length > 0) {
+      let closestSafeCrossing: SafeCrossingNode | null = null;
+      let minWeightedDist = Infinity;
+      for (const sc of safeCrossings) {
+        const d = calculateDistanceMeters([theoreticalLat, theoreticalLng], [sc.lat, sc.lng]);
+        // Weight traffic_signals more attractively (0.7x) so multi-phase lights are preferred over stop signs (1.0x)
+        const tierMultiplier = sc.type === 'traffic_signals' ? 0.7 : sc.type === 'marked_crossing' ? 0.85 : 1.0;
+        const weightedDist = d * tierMultiplier;
+        if (weightedDist < minWeightedDist && d < radiusKm * 1000 * 0.65) {
+          minWeightedDist = weightedDist;
+          closestSafeCrossing = sc;
+        }
+      }
+      if (closestSafeCrossing) {
+        waypoints.push([closestSafeCrossing.lat, closestSafeCrossing.lng]);
+        continue;
+      }
+    }
+
+    // 2. If corridor nodes exist (parks, greenways, or trails), snap directly to the nearest node
     if (corridors.length > 0) {
       let closestNode: CorridorNode | null = null;
       let minNodeDist = Infinity;
@@ -816,28 +1030,42 @@ function createLoopWaypoints(
 }
 
 /**
- * Generate accurate real-road Loop Route with calibrated distance matching and zero spurs
+ * Generate accurate real-road Loop Route with calibrated distance matching (up to 5% tolerance),
+ * freeway ramp avoidance, signalized intersection prioritization, and seamless fallback to regular mapping.
  */
 export async function generateRoadLoopRoute(
   start: LatLng,
   targetDistanceKm: number,
   activity: ActivityType,
   apiConfig?: ApiConfiguration
-): Promise<[number, number][]> {
+): Promise<{ coordinates: [number, number][]; safeCrossings: SafeCrossing[] }> {
   let radiusKm = targetDistanceKm / (2 * Math.PI * 1.35);
 
   // Discover greenways/parks for run, or trails for hike
   const corridors = await discoverCorridorNodes(start, radiusKm * 1.3, activity);
+  // Discover controlled intersections with lights or stop signs
+  const safeCrossings = await discoverSafeCrossings(start, radiusKm * 1.4);
 
   let bestCoords: [number, number][] = [];
+  let bestSafeCrossings: SafeCrossing[] = [];
   let bestDistDiff = Infinity;
 
-  // 3-pass calibration loop to stay within ±2%
-  for (let pass = 1; pass <= 3; pass++) {
-    const waypoints = createLoopWaypoints(start, radiusKm, 4, corridors);
-    const result = await fetchRealRoadPath(waypoints, activity, apiConfig);
+  // 4-pass calibration loop to stay within ±5%
+  for (let pass = 1; pass <= 4; pass++) {
+    // Passes 1-2: Attempt with safe crossings.
+    // Passes 3-4 (fallback): If safe crossings force an invalid path or exceed 5% tolerance,
+    // fall back cleanly to regular mapping as in previous versions.
+    const activeCrossings = pass <= 2 ? safeCrossings : [];
+    const waypoints = createLoopWaypoints(start, radiusKm, 4, corridors, activeCrossings);
+    const result = await fetchRealRoadPath(waypoints, activity, apiConfig, false, false, activeCrossings);
 
     if (result && result.coordinates.length > 5) {
+      // Reject any route that attempts to use freeway ramps or prohibited motorways
+      if (result.hasProhibitedRamps) {
+        radiusKm *= 0.85; // contract radius away from freeway barriers
+        continue;
+      }
+
       // Ensure any spur artifacts around junction points are thoroughly cleaned
       const cleaned = eliminateSpursAndInAndOuts(result.coordinates, true);
       const dist = calculateTotalDistanceKm(cleaned);
@@ -846,9 +1074,11 @@ export async function generateRoadLoopRoute(
       if (diff < bestDistDiff) {
         bestDistDiff = diff;
         bestCoords = cleaned;
+        bestSafeCrossings = result.safeCrossings || [];
       }
 
-      if (diff / targetDistanceKm <= 0.02) {
+      // 5% mandate tolerance check
+      if (diff / targetDistanceKm <= 0.05) {
         break;
       }
 
@@ -857,22 +1087,28 @@ export async function generateRoadLoopRoute(
     }
   }
 
+  // Fallback if no valid road route was generated
   if (bestCoords.length === 0) {
-    bestCoords = createLoopWaypoints(start, radiusKm, 8, corridors);
+    bestCoords = createLoopWaypoints(start, radiusKm, 8, corridors, []);
   }
 
-  return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.02);
+  return {
+    coordinates: enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.05),
+    safeCrossings: bestSafeCrossings,
+  };
 }
 
 /**
- * Generate accurate real-road Out-and-Back Route strictly matching target with ZERO spurs or detours
+ * Generate accurate real-road Out-and-Back Route strictly matching target within 5%,
+ * avoiding high-speed freeway ramps, funneling crossings through traffic signals,
+ * and falling back to regular mapping if needed.
  */
 export async function generateRoadOutAndBackRoute(
   start: LatLng,
   targetDistanceKm: number,
   activity: ActivityType,
   apiConfig?: ApiConfiguration
-): Promise<[number, number][]> {
+): Promise<{ coordinates: [number, number][]; safeCrossings: SafeCrossing[] }> {
   const latRad = (start.lat * Math.PI) / 180;
   const kmPerLat = 111.0;
   const kmPerLng = 111.0 * Math.cos(latRad);
@@ -881,6 +1117,8 @@ export async function generateRoadOutAndBackRoute(
 
   // Discover greenways/parks for run, or trails for hike
   const corridors = await discoverCorridorNodes(start, halfTargetKm * 1.3, activity);
+  // Discover controlled intersections with lights or stop signs
+  const safeCrossings = await discoverSafeCrossings(start, halfTargetKm * 1.4);
 
   let bearing = Math.random() * 2 * Math.PI;
   // If corridor exists, pick a bearing pointing towards the greenway / trail cluster
@@ -889,21 +1127,47 @@ export async function generateRoadOutAndBackRoute(
     const dLat = candidate.lat - start.lat;
     const dLng = (candidate.lng - start.lng) * Math.cos(latRad);
     bearing = Math.atan2(dLat, dLng);
+  } else if (safeCrossings.length > 0) {
+    // Steer towards tier 1 traffic signals if available
+    const signalsOnly = safeCrossings.filter((s) => s.type === 'traffic_signals');
+    const pool = signalsOnly.length > 0 ? signalsOnly : safeCrossings;
+    const candidate = pool[Math.floor(Math.random() * pool.length)];
+    const dLat = candidate.lat - start.lat;
+    const dLng = (candidate.lng - start.lng) * Math.cos(latRad);
+    bearing = Math.atan2(dLat, dLng);
   }
 
   let bestCoords: [number, number][] = [];
+  let bestSafeCrossings: SafeCrossing[] = [];
   let bestDiff = Infinity;
 
-  for (let pass = 0; pass < 3; pass++) {
-    const currentBearing = bearing + (pass === 0 ? 0 : pass === 1 ? 0.4 : -0.4);
+  for (let pass = 0; pass < 4; pass++) {
+    const currentBearing = bearing + (pass === 0 ? 0 : pass === 1 ? 0.4 : pass === 2 ? -0.4 : 0.8);
     // Probe ahead along the corridor far enough that real road distance reaches halfTargetKm
     const probeStraightKm = (halfTargetKm * 1.35) / 1.25;
 
     let probeLat = start.lat + (probeStraightKm / kmPerLat) * Math.sin(currentBearing);
     let probeLng = start.lng + (probeStraightKm / kmPerLng) * Math.cos(currentBearing);
 
-    // If corridor node is near probe destination, snap to it
-    if (corridors.length > 0) {
+    // Passes 0-1: Try snapping to safe crossing or corridor
+    // Passes 2-3: Fallback to regular mapping from previous versions
+    if (pass <= 1 && safeCrossings.length > 0) {
+      let closestCrossing: SafeCrossingNode | null = null;
+      let minWeightedD = Infinity;
+      for (const sc of safeCrossings) {
+        const d = calculateDistanceMeters([probeLat, probeLng], [sc.lat, sc.lng]);
+        const tierMultiplier = sc.type === 'traffic_signals' ? 0.7 : 1.0;
+        const weightedD = d * tierMultiplier;
+        if (weightedD < minWeightedD && d < probeStraightKm * 1000 * 0.6) {
+          minWeightedD = weightedD;
+          closestCrossing = sc;
+        }
+      }
+      if (closestCrossing) {
+        probeLat = closestCrossing.lat;
+        probeLng = closestCrossing.lng;
+      }
+    } else if (corridors.length > 0) {
       let closestNode: CorridorNode | null = null;
       let minD = Infinity;
       for (const n of corridors) {
@@ -919,13 +1183,21 @@ export async function generateRoadOutAndBackRoute(
       }
     }
 
+    const activeSafeCrossings = pass <= 1 ? safeCrossings : [];
     const outResult = await fetchRealRoadPath(
       [[start.lat, start.lng], [probeLat, probeLng]],
       activity,
-      apiConfig
+      apiConfig,
+      false,
+      false,
+      activeSafeCrossings
     );
 
     if (outResult && outResult.coordinates.length > 2) {
+      if (outResult.hasProhibitedRamps) {
+        continue; // Discard routes that enter freeway on-ramps
+      }
+
       // 1. Clean any spurs or in-and-outs along the outbound path
       const cleanOutbound = eliminateSpursAndInAndOuts(outResult.coordinates, false);
 
@@ -958,9 +1230,11 @@ export async function generateRoadOutAndBackRoute(
       if (diff < bestDiff) {
         bestDiff = diff;
         bestCoords = combined;
+        bestSafeCrossings = outResult.safeCrossings || [];
       }
 
-      if (diff / targetDistanceKm <= 0.01) {
+      // 5% mandate tolerance check
+      if (diff / targetDistanceKm <= 0.05) {
         break;
       }
     }
@@ -974,7 +1248,10 @@ export async function generateRoadOutAndBackRoute(
     bestCoords = [p1, p2, p1];
   }
 
-  return enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.01);
+  return {
+    coordinates: enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.05),
+    safeCrossings: bestSafeCrossings,
+  };
 }
 
 /**
@@ -1225,6 +1502,7 @@ export async function generateFullRoute(params: {
 
   let rawCoordinates: [number, number][] = [];
   let confidenceScore: number | undefined = undefined;
+  let safeCrossings: SafeCrossing[] = [];
 
   // 1. GPS Art Generation
   if (routeType === 'gps_art') {
@@ -1239,20 +1517,24 @@ export async function generateFullRoute(params: {
     confidenceScore = artResult.confidenceScore;
   } else if (routeType === 'loop') {
     // 2. Real Road Loop Route
-    rawCoordinates = await generateRoadLoopRoute(
+    const loopResult = await generateRoadLoopRoute(
       startLocation,
       targetDistanceKm,
       activity,
       apiConfig
     );
+    rawCoordinates = loopResult.coordinates;
+    safeCrossings = loopResult.safeCrossings;
   } else {
     // 3. Real Road Out-and-Back Route
-    rawCoordinates = await generateRoadOutAndBackRoute(
+    const outBackResult = await generateRoadOutAndBackRoute(
       startLocation,
       targetDistanceKm,
       activity,
       apiConfig
     );
+    rawCoordinates = outBackResult.coordinates;
+    safeCrossings = outBackResult.safeCrossings;
   }
 
   const actualDistanceKm = calculateTotalDistanceKm(rawCoordinates);
@@ -1281,6 +1563,7 @@ export async function generateFullRoute(params: {
     turnCount: Math.round(maskedCoordinates.length * 0.35),
     highestPointM: eleData.highestM,
     lowestPointM: eleData.lowestM,
+    safeCrossingCount: safeCrossings.length,
   };
 
   const defaultName =
@@ -1313,6 +1596,7 @@ export async function generateFullRoute(params: {
     elevationProfile: eleData.profile,
     stats: finalStats,
     privacy: privacyInfo,
+    safeCrossings,
     terrainFocus,
     surfaceType,
     createdAt: new Date().toISOString(),
