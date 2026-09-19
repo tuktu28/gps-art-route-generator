@@ -5,6 +5,16 @@ import { calculateDistanceMeters } from '../lib/routingEngine';
 import { Layers, Maximize2, Minimize2, Navigation, ZoomIn, ZoomOut, MapPin } from 'lucide-react';
 
 // Helper to linearly interpolate between two hex colors
+function escapeHtml(unsafe: unknown): string {
+  if (typeof unsafe !== 'string') return String(unsafe ?? '');
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function interpolateHexColor(color1: string, color2: string, factor: number): string {
   const c1 = parseInt(color1.replace('#', ''), 16);
   const c2 = parseInt(color2.replace('#', ''), 16);
@@ -45,6 +55,7 @@ interface TileLayerConfig {
   url: string;
   attribution: string;
   subdomains?: string[];
+  maxNativeZoom?: number;
   fallbackUrl?: string;
   fallbackAttribution?: string;
 }
@@ -66,22 +77,22 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         badge: 'Esri Topo',
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
         attribution: '&copy; Esri, HERE, Garmin, USGS',
-        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        fallbackAttribution: '&copy; OpenStreetMap contributors',
+        fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        fallbackAttribution: '&copy; Esri, DeLorme, NAVTEQ',
       },
   topo: {
     name: 'Topographic Contours',
     badge: 'Esri Topo',
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
     attribution: '&copy; Esri, DeLorme, NAVTEQ, USGS',
-    fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    fallbackAttribution: '&copy; OpenStreetMap contributors',
+    fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
   },
   osm: {
-    name: 'OpenStreetMap Standard',
-    badge: 'OSM',
-    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+    name: 'Street Map Standard',
+    badge: 'Esri Streets',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; <a href="https://www.esri.com/">Esri</a>, HERE, Garmin, USGS',
     fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
     fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
   },
@@ -92,6 +103,7 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         url: `https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`,
         attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
         subdomains: ['a', 'b', 'c', 'd'],
+        maxNativeZoom: 19,
         fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
         fallbackAttribution: '&copy; Esri, DeLorme, NAVTEQ',
       }
@@ -100,8 +112,9 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         badge: 'Esri Canvas',
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
         attribution: '&copy; Esri, DeLorme, NAVTEQ',
-        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        fallbackAttribution: '&copy; OpenStreetMap contributors',
+        maxNativeZoom: 16,
+        fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
       },
   dark: HAS_CARTO_KEY
     ? {
@@ -110,6 +123,7 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`,
         attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://openstreetmap.org">OSM</a>',
         subdomains: ['a', 'b', 'c', 'd'],
+        maxNativeZoom: 19,
         fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
         fallbackAttribution: '&copy; Esri, DeLorme, NAVTEQ',
       }
@@ -118,8 +132,9 @@ const getTileLayers = (): Record<TileLayerKey, TileLayerConfig> => ({
         badge: 'Esri Canvas',
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
         attribution: '&copy; Esri, DeLorme, NAVTEQ',
-        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        fallbackAttribution: '&copy; OpenStreetMap contributors',
+        maxNativeZoom: 16,
+        fallbackUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+        fallbackAttribution: '&copy; Esri, HERE, Garmin, USGS',
       },
   satellite: {
     name: 'Satellite View',
@@ -147,6 +162,7 @@ export const Map: React.FC<MapProps> = ({
   const clickMarkerRef = useRef<L.Marker | null>(null);
   const directionalMarkersRef = useRef<L.Marker[]>([]);
   const safeCrossingMarkersRef = useRef<L.Marker[]>([]);
+  const technicalWarningMarkersRef = useRef<L.Marker[]>([]);
 
   const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'outdoors');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -169,6 +185,7 @@ export const Map: React.FC<MapProps> = ({
       attribution: config.attribution,
       subdomains: config.subdomains || ['a', 'b', 'c', 'd'],
       maxZoom: 19,
+      maxNativeZoom: config.maxNativeZoom ?? 19,
     });
 
     if (config.fallbackUrl) {
@@ -317,6 +334,8 @@ export const Map: React.FC<MapProps> = ({
     directionalMarkersRef.current = [];
     safeCrossingMarkersRef.current.forEach((m) => map.removeLayer(m));
     safeCrossingMarkersRef.current = [];
+    technicalWarningMarkersRef.current.forEach((m) => map.removeLayer(m));
+    technicalWarningMarkersRef.current = [];
 
     if (!route || route.coordinates.length === 0) return;
 
@@ -440,7 +459,7 @@ export const Map: React.FC<MapProps> = ({
       .bindPopup(
         `<div class="p-1 font-sans">
           <b class="text-[#10B981] text-xs">Route Start Point</b>
-          <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-1">${route.startingAddress}</p>
+          <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-1">${escapeHtml(route.startingAddress)}</p>
         </div>`
       );
 
@@ -468,14 +487,14 @@ export const Map: React.FC<MapProps> = ({
         .bindPopup(
           `<div class="p-1 font-sans">
             <b class="text-[#EF4444] text-xs">Finish Line</b>
-            <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-1">Distance: ${route.stats.distanceKm} km</p>
+            <p class="text-[11px] text-stone-600 dark:text-stone-300 mt-1">Distance: ${Number(route.stats.distanceKm).toFixed(2)} km</p>
           </div>`
         );
     }
 
     // Render Controlled Safe Crossings (Traffic Lights / Stop Signs)
     if (route.safeCrossings && route.safeCrossings.length > 0) {
-      route.safeCrossings.forEach((crossing, idx) => {
+      route.safeCrossings.forEach((crossing) => {
         const isLight = crossing.type === 'traffic_signals';
         const isStop = crossing.type === 'stop';
         const badgeBg = isLight ? '#10B981' : isStop ? '#EF4444' : '#3B82F6';
@@ -498,19 +517,59 @@ export const Map: React.FC<MapProps> = ({
           iconAnchor: [10, 10],
         });
 
+        const safeTitle = isLight
+          ? '🚦 Controlled Intersection'
+          : isStop
+          ? '🛑 Stop-Sign Crossing'
+          : '🚶 Safe Pedestrian Crossing';
+        const rawCrossingName = crossing.roadName || crossing.name || 'Verified Safe Crossing';
+        const safeCrossingName = escapeHtml(rawCrossingName);
+
         const crossingMarker = L.marker([crossing.lat, crossing.lng], { icon: crossingIcon })
           .addTo(map)
           .bindPopup(
             `<div class="p-1 font-sans">
               <div class="flex items-center gap-1.5 font-bold text-xs ${isLight ? 'text-emerald-600' : isStop ? 'text-rose-600' : 'text-blue-600'}">
-                <span>${isLight ? '🚦 Controlled Intersection' : isStop ? '🛑 Stop-Sign Crossing' : '🚶 Safe Pedestrian Crossing'}</span>
+                <span>${safeTitle}</span>
               </div>
-              <p class="text-[11px] font-medium text-stone-700 dark:text-stone-200 mt-1">${crossing.roadName || crossing.name || 'Verified Safe Crossing'}</p>
+              <p class="text-[11px] font-medium text-stone-700 dark:text-stone-200 mt-1">${safeCrossingName}</p>
               <p class="text-[10px] text-stone-500 mt-0.5">Route prioritized for pedestrian & cyclist safety</p>
             </div>`
           );
 
         safeCrossingMarkersRef.current.push(crossingMarker);
+      });
+    }
+
+    // Render MTB Technical Segment Warnings (mtb:scale 3+)
+    if (route.technicalWarnings && route.technicalWarnings.length > 0) {
+      route.technicalWarnings.forEach((tw) => {
+        const warningIcon = L.divIcon({
+          className: 'mtb-technical-marker',
+          html: `
+            <div class="relative group cursor-pointer flex items-center justify-center">
+              <div class="w-6 h-6 rounded-full bg-amber-500 border-2 border-white dark:border-stone-900 shadow-lg flex items-center justify-center text-white text-[10px] font-black tracking-tight animate-bounce">
+                S${escapeHtml(tw.mtbScale)}+
+              </div>
+            </div>
+          `,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+
+        const twMarker = L.marker([tw.lat, tw.lng], { icon: warningIcon })
+          .addTo(map)
+          .bindPopup(
+            `<div class="p-1.5 font-sans max-w-[220px]">
+              <div class="flex items-center gap-1.5 font-bold text-xs text-amber-600 dark:text-amber-400">
+                <span>⚠️ Technical MTB Trail (Scale S${escapeHtml(tw.mtbScale)}+)</span>
+              </div>
+              <p class="text-[11px] font-semibold text-stone-800 dark:text-stone-100 mt-1">${escapeHtml(tw.name)}</p>
+              <p class="text-[10px] text-stone-600 dark:text-stone-300 mt-1 leading-normal">${escapeHtml(tw.description)}</p>
+            </div>`
+          );
+
+        technicalWarningMarkersRef.current.push(twMarker);
       });
     }
 

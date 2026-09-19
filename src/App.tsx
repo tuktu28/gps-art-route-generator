@@ -15,6 +15,7 @@ import { RouteForm } from './components/RouteForm';
 import { MasterGuideModal } from './components/MasterGuideModal';
 import {
   Activity,
+  AlertTriangle,
   BookOpen,
   Clock,
   Download,
@@ -269,6 +270,22 @@ export default function App() {
                   </span>
                 </div>
               )}
+
+              {currentRoute?.gravelFallbackUsed && (
+                <div className="px-2.5 py-1 rounded-full bg-sky-50/95 dark:bg-sky-950/90 border border-sky-300 dark:border-sky-700 shadow-md backdrop-blur-sm text-[10px] font-mono text-sky-800 dark:text-sky-200 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                  <span className="font-semibold">Gravel Multi-Use Path Fallback</span>
+                </div>
+              )}
+
+              {currentRoute?.technicalWarnings && currentRoute.technicalWarnings.length > 0 && (
+                <div className="px-2.5 py-1 rounded-full bg-amber-50/95 dark:bg-amber-950/90 border border-amber-300 dark:border-amber-700 shadow-md backdrop-blur-sm text-[10px] font-mono text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span className="font-semibold">
+                    {currentRoute.technicalWarnings.length} Technical Trail {currentRoute.technicalWarnings.length === 1 ? 'Warning' : 'Warnings'} (S3+)
+                  </span>
+                </div>
+              )}
             </div>
 
             <Map
@@ -279,6 +296,24 @@ export default function App() {
               isDarkMode={isDarkMode}
             />
           </div>
+
+          {/* Technical Warning Alert Banner for MTB */}
+          {currentRoute?.technicalWarnings && currentRoute.technicalWarnings.length > 0 && (
+            <div className="p-3.5 rounded-2xl bg-amber-50/90 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-900/60 text-xs text-amber-950 dark:text-amber-200 flex items-start gap-3 shadow-sm">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1 space-y-1">
+                <div className="font-bold flex items-center gap-2">
+                  <span>Advanced Mountain Bike Handling Required</span>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900/80 text-amber-800 dark:text-amber-200 text-[10px] font-mono font-bold">
+                    mtb:scale 3+
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-900/85 dark:text-amber-300 leading-relaxed">
+                  This route traverses {currentRoute.technicalWarnings.length} severe singletrack {currentRoute.technicalWarnings.length === 1 ? 'section' : 'sections'} rated S3 or higher. Expect large rock gardens, steep drop-offs (over 40% grade), tight switchbacks, or exposed roots. Inspect the orange warning pins on the map before riding.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Active Route Telemetry & Action Bar */}
           {currentRoute ? (

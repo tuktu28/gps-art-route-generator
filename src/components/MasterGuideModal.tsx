@@ -37,7 +37,7 @@ export const MasterGuideModal: React.FC<MasterGuideModalProps> = ({ isOpen, onCl
       iconColor: 'text-[#2D4F3E] dark:text-[#7EB89B]',
       bgColor: 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/20',
       description:
-        'Choose Run, Walk, or Road Bike. Select from Loop (circular closed circuit), Point to Point (one-way), Curated Scenic (parks & greenways), or GPS Art (spell words or shapes onto city streets).',
+        'Choose Run (parks & greenways via quiet roads), Road Bike (bike lanes & paved greenways), Mountain Bike (roads to bike trails, then trails), or Hike. Select Loop, Out & Back, or GPS Art.',
     },
     {
       step: '03',

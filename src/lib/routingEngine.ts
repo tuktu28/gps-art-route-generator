@@ -10,6 +10,7 @@ import {
   RouteStats,
   RouteType,
   SafeCrossing,
+  TechnicalSegmentWarning,
 } from '../types/route';
 import { CONTINUOUS_GLYPHS, GLYPH_STROKES } from './glyphEngine';
 
@@ -45,21 +46,33 @@ export function calculateTotalDistanceKm(points: [number, number][]): number {
 }
 
 /**
- * Corridor node discovered via OpenStreetMap (greenbelt, greenway, park, sidewalk, or hiking trail)
+ * Corridor node discovered via OpenStreetMap (greenbelt, greenway, park, sidewalk, hiking trail, or mtb trail)
  */
 export interface CorridorNode {
   lat: number;
   lng: number;
-  type: 'park' | 'greenway' | 'trail' | 'sidewalk' | 'waterway';
+  type: 'park' | 'greenway' | 'trail' | 'sidewalk' | 'waterway' | 'quiet_street' | 'bike_lane' | 'mtb_trail' | 'gravel_path';
   name?: string;
+  surface?: string;
+  mtbScale?: number;
+}
+
+/**
+ * Check if the selected activity is any bicycling variant
+ */
+export function isBikeActivity(activity: ActivityType): boolean {
+  return activity === 'road_bike' || activity === 'mountain_bike' || activity === 'bike';
 }
 
 // In-memory cache for fast repeated queries in the same region
 const corridorCache = new Map<string, CorridorNode[]>();
 
 /**
- * Discovers greenbelts, greenways, parks, and sidewalks for running,
- * or dedicated trails, footpaths, singletracks, and nature reserves for hiking.
+ * Discovers corridors tailored to user preferences:
+ * - Running: Roads to greenways, greenbelts, parks, sidewalks, and quiet neighborhood streets while avoiding heavy traffic.
+ * - Road Bike: Prioritizes designated bike lanes, paved greenways, and low-stress bike-friendly roads.
+ * - Mountain Bike: Prioritizes roads that get users to the bike trails, then trails, then roads.
+ * - Hike: Unpaved nature trails, footpaths, and nature reserves.
  */
 export async function discoverCorridorNodes(
   center: LatLng,
@@ -77,7 +90,7 @@ export async function discoverCorridorNodes(
   if (activity === 'hike') {
     // Hiking: focus on actual trails, footpaths, tracks, hiking routes, nature reserves
     queryBody = `
-      [out:json][timeout:3];
+      [out:json][timeout:4];
       (
         way["highway"~"path|track|footway|bridleway"]["highway"!~"living_street|service|construction"](around:${radiusMeters},${center.lat},${center.lng});
         relation["route"="hiking"](around:${radiusMeters},${center.lat},${center.lng});
@@ -85,34 +98,61 @@ export async function discoverCorridorNodes(
         way["leisure"="nature_reserve"](around:${radiusMeters},${center.lat},${center.lng});
         way["natural"~"wood|peak|ridge|cliff"](around:${radiusMeters},${center.lat},${center.lng});
       );
-      out center 35;
+      out center 40;
     `;
-  } else if (activity === 'run') {
-    // Running: focus on greenbelts, greenways, parks, pedestrian paths, sidewalks, and quiet thoroughfares
-    // Excludes residential cul-de-sacs, driveways, and service alleys
+  } else if (activity === 'mountain_bike') {
+    // Mountain Bike: prioritize roads that get users to the bike trails, then trails, then roads.
+    // Queries dedicated MTB tracks and parses mtb:scale, while including multi-use gravel paths for fallback.
     queryBody = `
-      [out:json][timeout:3];
+      [out:json][timeout:4];
       (
-        way["highway"~"footway|pedestrian|path|cycleway"]["highway"!~"living_street|service|construction"](around:${radiusMeters},${center.lat},${center.lng});
-        relation["route"="running"](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"track|path|bridleway"]["bicycle"!~"no"](around:${radiusMeters},${center.lat},${center.lng});
+        relation["route"="mtb"](around:${radiusMeters},${center.lat},${center.lng});
+        way["route"="mtb"](around:${radiusMeters},${center.lat},${center.lng});
+        way["mtb:scale"](around:${radiusMeters},${center.lat},${center.lng});
+        node["highway"="trailhead"](around:${radiusMeters},${center.lat},${center.lng});
+        way["leisure"="nature_reserve"]["bicycle"!~"no"](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"track|path|cycleway"]["surface"~"gravel|fine_gravel|compacted|dirt|unpaved|ground|earth"]["bicycle"!~"no"](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"="residential"]["surface"!~"unpaved|dirt|gravel"](around:${radiusMeters},${center.lat},${center.lng});
       );
-      out center 35;
+      out center 50;
+    `;
+  } else if (activity === 'road_bike' || activity === 'bike') {
+    // Road Bike: designated bike lanes, paved greenways, and low-stress bike-friendly roads
+    // Strictly exclude unpaved surfaces
+    queryBody = `
+      [out:json][timeout:4];
+      (
+        way["highway"="cycleway"]["surface"!~"unpaved|dirt|gravel|ground|sand|compacted|fine_gravel|earth|mud|grass|cobblestone|wood|pebblestone"](around:${radiusMeters},${center.lat},${center.lng});
+        way["cycleway"~"lane|track|opposite_lane|opposite_track|share_busway"]["surface"!~"unpaved|dirt|gravel|ground|sand|compacted|fine_gravel|earth|mud|grass|cobblestone|wood|pebblestone"](around:${radiusMeters},${center.lat},${center.lng});
+        way["bicycle"="designated"]["surface"!~"unpaved|dirt|gravel|ground|sand|compacted|fine_gravel|earth|mud|grass|cobblestone|wood|pebblestone"](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"cycleway|path"]["surface"~"paved|asphalt|concrete|paving_stones|chipseal"](around:${radiusMeters},${center.lat},${center.lng});
+        way["cyclestreet"="yes"](around:${radiusMeters},${center.lat},${center.lng});
+        way["bicycle_road"="yes"](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"residential|tertiary|unclassified"]["surface"!~"unpaved|dirt|gravel|ground|sand|compacted|fine_gravel|earth|mud|grass|cobblestone|wood|pebblestone"]["bicycle"!~"no"]["maxspeed"!~"^[5-9][0-9]"](around:${radiusMeters},${center.lat},${center.lng});
+        relation["route"="bicycle"]["surface"!~"unpaved|dirt|gravel|ground|sand|compacted|fine_gravel|earth|mud|grass|cobblestone|wood|pebblestone"](around:${radiusMeters},${center.lat},${center.lng});
+      );
+      out center 45;
     `;
   } else {
-    // Bike: cycleways, bike paths, excluding service alleys
+    // Running: roads that get users to greenways, greenbelts, parks, sidewalks, and quiet neighborhood streets while avoiding heavy traffic
     queryBody = `
-      [out:json][timeout:3];
+      [out:json][timeout:4];
       (
-        way["highway"="cycleway"]["highway"!~"living_street|service|construction"](around:${radiusMeters},${center.lat},${center.lng});
-        way["bicycle"~"yes|designated"]["highway"!~"living_street|service|construction"](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"footway|pedestrian|path|cycleway"]["foot"!~"no"]["highway"!~"motorway|trunk|primary|service|construction"](around:${radiusMeters},${center.lat},${center.lng});
+        way["leisure"~"park|garden|nature_reserve"](around:${radiusMeters},${center.lat},${center.lng});
+        way["landuse"~"greenfield|recreation_ground|grass|village_green"](around:${radiusMeters},${center.lat},${center.lng});
+        way["sidewalk"~"yes|both|left|right"](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"residential|living_street"]["maxspeed"!~"^[4-9][0-9]"](around:${radiusMeters},${center.lat},${center.lng});
+        relation["route"~"running|foot"](around:${radiusMeters},${center.lat},${center.lng});
       );
-      out center 30;
+      out center 45;
     `;
   }
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3200);
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
     const endpoints = [
       'https://overpass-api.de/api/interpreter',
@@ -140,11 +180,88 @@ export async function discoverCorridorNodes(
               if (lat && lng) {
                 const dist = calculateDistanceMeters([center.lat, center.lng], [lat, lng]) / 1000;
                 if (dist <= radiusKm * 1.5 && dist >= 0.1) {
+                  const surfaceTag = (el.tags?.surface || '').toLowerCase();
+                  const unpavedRegex = /unpaved|dirt|gravel|ground|sand|compacted|fine_gravel|earth|mud|grass|cobblestone|wood|pebblestone/i;
+                  const isUnpaved = unpavedRegex.test(surfaceTag);
+
+                  // MANDATE: Road bike should NEVER use an unpaved trail
+                  if (activity === 'road_bike' || activity === 'bike') {
+                    if (isUnpaved) {
+                      continue; // Immediately discard unpaved surface for road bike
+                    }
+                    if (el.tags?.highway === 'path' || el.tags?.highway === 'track' || el.tags?.highway === 'bridleway') {
+                      if (!/paved|asphalt|concrete|paving_stones|chipseal/i.test(surfaceTag)) {
+                        continue; // Strictly reject non-paved trails for road bike
+                      }
+                    }
+                  }
+
+                  let nodeType: CorridorNode['type'] = 'greenway';
+                  let mtbScale: number | undefined = undefined;
+
+                  if (activity === 'hike') {
+                    nodeType = 'trail';
+                  } else if (activity === 'mountain_bike') {
+                    // Detect and parse mtb:scale (0 to 6)
+                    const scaleStr = el.tags?.['mtb:scale'] || el.tags?.['mtb:scale:uphill'];
+                    if (scaleStr !== undefined) {
+                      const match = String(scaleStr).match(/(\d+)/);
+                      if (match) {
+                        mtbScale = parseInt(match[1], 10);
+                      }
+                    }
+
+                    const isExplicitMtb =
+                      el.tags?.route === 'mtb' ||
+                      el.tags?.highway === 'trailhead' ||
+                      mtbScale !== undefined;
+
+                    const isGravelOrUnpaved =
+                      /gravel|fine_gravel|compacted|dirt|unpaved|ground|earth/i.test(surfaceTag) ||
+                      el.tags?.highway === 'track' ||
+                      (el.tags?.highway === 'path' && !isExplicitMtb);
+
+                    if (isExplicitMtb) {
+                      nodeType = 'mtb_trail';
+                    } else if (isGravelOrUnpaved) {
+                      nodeType = 'gravel_path';
+                    } else if (el.tags?.highway === 'residential') {
+                      nodeType = 'quiet_street';
+                    } else {
+                      nodeType = 'gravel_path';
+                    }
+                  } else if (activity === 'road_bike' || activity === 'bike') {
+                    if (el.tags?.cycleway || el.tags?.bicycle === 'designated') {
+                      nodeType = 'bike_lane';
+                    } else if (
+                      el.tags?.highway === 'cycleway' ||
+                      el.tags?.surface === 'paved' ||
+                      el.tags?.surface === 'asphalt' ||
+                      el.tags?.surface === 'concrete'
+                    ) {
+                      nodeType = 'greenway';
+                    } else {
+                      nodeType = 'quiet_street';
+                    }
+                  } else if (activity === 'run') {
+                    if (el.tags?.leisure === 'park' || el.tags?.leisure === 'garden' || el.tags?.landuse) {
+                      nodeType = 'park';
+                    } else if (el.tags?.sidewalk) {
+                      nodeType = 'sidewalk';
+                    } else if (el.tags?.highway === 'residential' || el.tags?.highway === 'living_street') {
+                      nodeType = 'quiet_street';
+                    } else {
+                      nodeType = 'greenway';
+                    }
+                  }
+
                   nodes.push({
                     lat,
                     lng,
-                    type: activity === 'hike' ? 'trail' : 'greenway',
+                    type: nodeType,
                     name: el.tags?.name,
+                    surface: el.tags?.surface,
+                    mtbScale,
                   });
                 }
               }
@@ -380,12 +497,13 @@ export function eliminateSpursAndInAndOuts(
           const headingDelta = calculateAngleDelta(inHeading, outHeading);
 
           // Detour condition along continuous corridor:
+          // Catches roadside verge pop-outs, alley bypasses, and parking excursions up to 85m
           if (
-            directDist >= 10 &&
-            directDist <= 50 &&
-            accumulatedPathM >= 35 &&
-            accumulatedPathM >= directDist * 1.45 &&
-            headingDelta <= 50
+            directDist >= 8 &&
+            directDist <= 85 &&
+            accumulatedPathM >= 20 &&
+            accumulatedPathM >= directDist * 1.35 &&
+            headingDelta <= 75
           ) {
             bestDetourK = k;
           }
@@ -437,8 +555,17 @@ export async function fetchRealRoadPath(
   if (orsKey && orsKey.length > 10) {
     try {
       // foot-hiking for hiking, foot-walking for running (pedestrian, greenway & sidewalk focus)
+      // cycling-mountain for mountain bike, cycling-road for road bike
       const orsProfile =
-        activity === 'bike' ? 'cycling-regular' : activity === 'hike' ? 'foot-hiking' : 'foot-walking';
+        activity === 'mountain_bike'
+          ? 'cycling-mountain'
+          : activity === 'road_bike'
+          ? 'cycling-road'
+          : isBikeActivity(activity)
+          ? 'cycling-regular'
+          : activity === 'hike'
+          ? 'foot-hiking'
+          : 'foot-walking';
 
       const endpoints = [
         `https://api.openrouteservice.org/v2/directions/${orsProfile}/geojson`,
@@ -461,7 +588,10 @@ export async function fetchRealRoadPath(
               coordinates: waypoints.map(([lat, lng]) => [lng, lat]),
               preference: 'recommended',
               options: {
-                avoid_features: ['highways', 'tollways', 'ferries'],
+                avoid_features:
+                  activity === 'road_bike' || activity === 'bike'
+                    ? ['highways', 'tollways', 'ferries', 'unpavedroads', 'steps']
+                    : ['highways', 'tollways', 'ferries'],
               },
             }),
             signal: controller.signal,
@@ -500,11 +630,21 @@ export async function fetchRealRoadPath(
   // 2. Query Public OpenStreetMap OSRM Routing Engines (Free, accurate real-road routing)
   const coordString = waypoints.map(([lat, lng]) => `${lng.toFixed(6)},${lat.toFixed(6)}`).join(';');
 
-  // Profiles based on activity: routed-foot prioritizes footways, sidewalks, cycleways, parks, and calm paths
+  // Profiles based on activity:
+  // - road_bike: routed-bike prioritizes smooth asphalt, bike lanes, paved greenways
+  // - mountain_bike: routed-bike with routed-foot fallback allows singletracks and dirt paths
+  // - run / hike: routed-foot prioritizes footways, sidewalks, parks, and calm residential streets
   const continueStraight = allowUTurns ? '' : '&continue_straight=true';
   const extraParams = `${continueStraight}&steps=true&annotations=true`;
   const osrmEndpoints =
-    activity === 'bike'
+    activity === 'mountain_bike'
+      ? [
+          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
+        ]
+      : isBikeActivity(activity)
       ? [
           `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
           `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson${extraParams}`,
@@ -537,12 +677,35 @@ export async function fetchRealRoadPath(
           const distKm = calculateTotalDistanceKm(cleanCoords);
 
           let hasProhibitedRamps = false;
+          let hasUnpavedTrail = false;
           const detectedSafeCrossings: SafeCrossing[] = [];
+
+          const unpavedStepKeywords = [
+            'unpaved',
+            'dirt track',
+            'dirt road',
+            'singletrack',
+            'nature trail',
+            'hiking trail',
+            'mtb',
+            'gravel track',
+            'gravel path',
+            'earth path',
+          ];
 
           for (const leg of route.legs || []) {
             for (const step of leg.steps || []) {
               if (isProhibitedFreewayOrRamp(step)) {
                 hasProhibitedRamps = true;
+              }
+
+              // Road bike mandate: strictly reject any route that uses an unpaved trail
+              if (activity === 'road_bike') {
+                const sName = (step.name || '').toLowerCase();
+                const sRef = (step.ref || '').toLowerCase();
+                if (unpavedStepKeywords.some((kw) => sName.includes(kw) || sRef.includes(kw))) {
+                  hasUnpavedTrail = true;
+                }
               }
 
               if (isMajorArterialRoad(step.name) && step.intersections) {
@@ -587,6 +750,11 @@ export async function fetchRealRoadPath(
             }
           }
 
+          if (hasUnpavedTrail) {
+            // Discard unpaved candidate for road bike and try next paved routing endpoint
+            continue;
+          }
+
           return {
             coordinates: cleanCoords,
             distanceKm: distKm,
@@ -611,7 +779,7 @@ export async function snapPointToNearestRoad(
   lng: number,
   activity: ActivityType = 'run'
 ): Promise<[number, number]> {
-  const profile = activity === 'bike' ? 'bike' : 'foot';
+  const profile = isBikeActivity(activity) && activity !== 'mountain_bike' ? 'bike' : 'foot';
   const url = `https://router.project-osrm.org/nearest/v1/${profile}/${lng.toFixed(6)},${lat.toFixed(6)}`;
   try {
     const controller = new AbortController();
@@ -953,20 +1121,57 @@ export async function generateRoadGpsArtRoute(
 }
 
 /**
- * Generate radial guide waypoints for a loop, biasing through discovered greenways or trails
+ * Generate radial guide waypoints for a loop, biasing through discovered corridors
+ * according to user activity preferences:
+ * - Running: roads to greenways/parks/sidewalks, staying on them, then quiet roads.
+ * - Road Bike: designated bike lanes, paved greenways, low-stress roads.
+ * - Mountain Bike: roads to trails, staying on trails, then roads.
  */
 function createLoopWaypoints(
   start: LatLng,
   radiusKm: number,
   numPoints: number = 4,
   corridors: CorridorNode[] = [],
-  safeCrossings: SafeCrossingNode[] = []
+  safeCrossings: SafeCrossingNode[] = [],
+  activity: ActivityType = 'run'
 ): [number, number][] {
   const latRad = (start.lat * Math.PI) / 180;
   const kmPerLat = 111.0;
   const kmPerLng = 111.0 * Math.cos(latRad);
 
-  const centerBearing = Math.random() * 2 * Math.PI;
+  // Steer loop center towards preferred corridor clusters if available
+  let centerBearing = Math.random() * 2 * Math.PI;
+  if (corridors.length > 0) {
+    let preferredPool: CorridorNode[] = [];
+    if (activity === 'mountain_bike') {
+      const mtbNodes = corridors.filter((c) => c.type === 'mtb_trail');
+      const gravelNodes = corridors.filter((c) => c.type === 'gravel_path');
+      // Gracefully fall back to gravel multi-use paths if no mtb_trail singletracks exist
+      preferredPool = mtbNodes.length > 0 ? mtbNodes : gravelNodes;
+    } else if (activity === 'road_bike' || activity === 'bike') {
+      // Road bike MUST never use unpaved trails
+      preferredPool = corridors.filter(
+        (c) =>
+          (c.type === 'bike_lane' || c.type === 'greenway' || c.type === 'quiet_street') &&
+          c.surface !== 'unpaved' &&
+          c.surface !== 'dirt' &&
+          c.surface !== 'gravel' &&
+          c.surface !== 'compacted' &&
+          c.surface !== 'fine_gravel'
+      );
+    } else if (activity === 'run') {
+      preferredPool = corridors.filter((c) => c.type === 'park' || c.type === 'greenway' || c.type === 'sidewalk');
+    } else if (activity === 'hike') {
+      preferredPool = corridors.filter((c) => c.type === 'trail');
+    }
+
+    const pool = preferredPool.length > 0 ? preferredPool : corridors;
+    const targetClusterNode = pool[Math.floor(Math.random() * pool.length)];
+    const dLat = targetClusterNode.lat - start.lat;
+    const dLng = (targetClusterNode.lng - start.lng) * Math.cos(latRad);
+    centerBearing = Math.atan2(dLat, dLng);
+  }
+
   const centerLat = start.lat + (radiusKm / kmPerLat) * Math.sin(centerBearing);
   const centerLng = start.lng + (radiusKm / kmPerLng) * Math.cos(centerBearing);
 
@@ -983,13 +1188,11 @@ function createLoopWaypoints(
     const theoreticalLng = centerLng + (r / kmPerLng) * Math.cos(targetAngle);
 
     // 1. If safe crossing exists near the theoretical point, anchor to it!
-    // Priority: traffic_signals (Tier 1) prioritized over marked_crossing (Tier 2) and stop signs (Tier 3)
     if (safeCrossings.length > 0) {
       let closestSafeCrossing: SafeCrossingNode | null = null;
       let minWeightedDist = Infinity;
       for (const sc of safeCrossings) {
         const d = calculateDistanceMeters([theoreticalLat, theoreticalLng], [sc.lat, sc.lng]);
-        // Weight traffic_signals more attractively (0.7x) so multi-phase lights are preferred over stop signs (1.0x)
         const tierMultiplier = sc.type === 'traffic_signals' ? 0.7 : sc.type === 'marked_crossing' ? 0.85 : 1.0;
         const weightedDist = d * tierMultiplier;
         if (weightedDist < minWeightedDist && d < radiusKm * 1000 * 0.65) {
@@ -1003,15 +1206,91 @@ function createLoopWaypoints(
       }
     }
 
-    // 2. If corridor nodes exist (parks, greenways, or trails), snap directly to the nearest node
+    // 2. Activity-sensitive corridor snapping
     if (corridors.length > 0) {
       let closestNode: CorridorNode | null = null;
       let minNodeDist = Infinity;
+      const isOutboundConnector = i === 1;
+      const isReturnConnector = i === numPoints - 1;
+      const isCoreWorkout = !isOutboundConnector && !isReturnConnector;
 
       for (const node of corridors) {
+        // Road bike mandate: never select unpaved trail
+        if (activity === 'road_bike' || activity === 'bike') {
+          if (
+            node.surface === 'unpaved' ||
+            node.surface === 'dirt' ||
+            node.surface === 'gravel' ||
+            node.surface === 'compacted' ||
+            node.surface === 'fine_gravel' ||
+            node.type === 'trail' ||
+            node.type === 'mtb_trail' ||
+            node.type === 'gravel_path'
+          ) {
+            continue;
+          }
+        }
+
         const d = calculateDistanceMeters([theoreticalLat, theoreticalLng], [node.lat, node.lng]);
-        if (d < minNodeDist && d < radiusKm * 1000 * 0.5) {
-          minNodeDist = d;
+        if (d >= radiusKm * 1000 * 0.6) continue;
+
+        // Weight multiplier (lower is better)
+        let weight = 1.0;
+        if (activity === 'mountain_bike') {
+          if (isCoreWorkout) {
+            weight =
+              node.type === 'mtb_trail'
+                ? 0.35
+                : node.type === 'gravel_path'
+                ? 0.45
+                : node.type === 'trail'
+                ? 0.55
+                : 1.2;
+          } else {
+            // Outbound or return leg: roads to trails, then trails to roads
+            weight =
+              node.type === 'quiet_street'
+                ? 0.6
+                : node.type === 'mtb_trail'
+                ? 0.7
+                : node.type === 'gravel_path'
+                ? 0.75
+                : 1.0;
+          }
+        } else if (activity === 'road_bike' || activity === 'bike') {
+          weight =
+            node.type === 'bike_lane'
+              ? 0.35
+              : node.type === 'greenway'
+              ? 0.5
+              : node.type === 'quiet_street'
+              ? 0.75
+              : 1.2;
+        } else if (activity === 'run') {
+          if (isCoreWorkout) {
+            // Staying on greenways, parks, sidewalks
+            weight =
+              node.type === 'park'
+                ? 0.35
+                : node.type === 'greenway'
+                ? 0.4
+                : node.type === 'sidewalk'
+                ? 0.5
+                : 1.1;
+          } else {
+            // Outbound road to park, or return road to start
+            weight =
+              node.type === 'quiet_street'
+                ? 0.6
+                : node.type === 'greenway' || node.type === 'park'
+                ? 0.65
+                : 1.0;
+          }
+        }
+
+        const weightedD = d * weight;
+        if (weightedD < minNodeDist) {
+          minNodeDist = weightedD;
           closestNode = node;
         }
       }
@@ -1030,18 +1309,24 @@ function createLoopWaypoints(
 }
 
 /**
- * Generate accurate real-road Loop Route with calibrated distance matching (up to 5% tolerance),
- * freeway ramp avoidance, signalized intersection prioritization, and seamless fallback to regular mapping.
+ * Generate accurate real-road Loop Route with calibrated distance matching
+ * (±10% margin for Mountain Bike, ±5% for others), freeway ramp avoidance,
+ * technical difficulty flagging (mtb:scale 3+), and graceful gravel fallback.
  */
 export async function generateRoadLoopRoute(
   start: LatLng,
   targetDistanceKm: number,
   activity: ActivityType,
   apiConfig?: ApiConfiguration
-): Promise<{ coordinates: [number, number][]; safeCrossings: SafeCrossing[] }> {
+): Promise<{
+  coordinates: [number, number][];
+  safeCrossings: SafeCrossing[];
+  technicalWarnings?: TechnicalSegmentWarning[];
+  gravelFallbackUsed?: boolean;
+}> {
   let radiusKm = targetDistanceKm / (2 * Math.PI * 1.35);
 
-  // Discover greenways/parks for run, or trails for hike
+  // Discover corridors tailored to activity
   const corridors = await discoverCorridorNodes(start, radiusKm * 1.3, activity);
   // Discover controlled intersections with lights or stop signs
   const safeCrossings = await discoverSafeCrossings(start, radiusKm * 1.4);
@@ -1050,13 +1335,21 @@ export async function generateRoadLoopRoute(
   let bestSafeCrossings: SafeCrossing[] = [];
   let bestDistDiff = Infinity;
 
-  // 4-pass calibration loop to stay within ±5%
+  // Margin tolerance: 10% for Mountain Bike, 5% for all other activities
+  const toleranceMargin = activity === 'mountain_bike' ? 0.10 : 0.05;
+
+  // 4-pass calibration loop
   for (let pass = 1; pass <= 4; pass++) {
-    // Passes 1-2: Attempt with safe crossings.
-    // Passes 3-4 (fallback): If safe crossings force an invalid path or exceed 5% tolerance,
-    // fall back cleanly to regular mapping as in previous versions.
     const activeCrossings = pass <= 2 ? safeCrossings : [];
-    const waypoints = createLoopWaypoints(start, radiusKm, 4, corridors, activeCrossings);
+    const rawWaypoints = createLoopWaypoints(start, radiusKm, 4, corridors, activeCrossings, activity);
+    // Pre-snap all guide waypoints to verified OpenStreetMap road centerlines so waypoints never sit off-road
+    const waypoints: [number, number][] = [rawWaypoints[0]];
+    for (let w = 1; w < rawWaypoints.length - 1; w++) {
+      const snapped = await snapPointToNearestRoad(rawWaypoints[w][0], rawWaypoints[w][1], activity);
+      waypoints.push(snapped);
+    }
+    waypoints.push(rawWaypoints[rawWaypoints.length - 1]);
+
     const result = await fetchRealRoadPath(waypoints, activity, apiConfig, false, false, activeCrossings);
 
     if (result && result.coordinates.length > 5) {
@@ -1077,8 +1370,8 @@ export async function generateRoadLoopRoute(
         bestSafeCrossings = result.safeCrossings || [];
       }
 
-      // 5% mandate tolerance check
-      if (diff / targetDistanceKm <= 0.05) {
+      // Distance margin check (10% for MTB, 5% for others)
+      if (diff / targetDistanceKm <= toleranceMargin) {
         break;
       }
 
@@ -1089,12 +1382,47 @@ export async function generateRoadLoopRoute(
 
   // Fallback if no valid road route was generated
   if (bestCoords.length === 0) {
-    bestCoords = createLoopWaypoints(start, radiusKm, 8, corridors, []);
+    bestCoords = createLoopWaypoints(start, radiusKm, 8, corridors, [], activity);
   }
 
+  const finalCoords = enforceDistanceTolerance(bestCoords, targetDistanceKm, toleranceMargin);
+
+  // Technical difficulty flagging (mtb:scale 3+) on route
+  const technicalWarnings: TechnicalSegmentWarning[] = [];
+  if (activity === 'mountain_bike') {
+    for (const c of corridors) {
+      if (c.mtbScale && c.mtbScale >= 3) {
+        const isNear = finalCoords.some(
+          ([rLat, rLng]) => calculateDistanceMeters([rLat, rLng], [c.lat, c.lng]) <= 250
+        );
+        if (isNear) {
+          const exists = technicalWarnings.some(
+            (tw) => calculateDistanceMeters([tw.lat, tw.lng], [c.lat, c.lng]) <= 50
+          );
+          if (!exists) {
+            technicalWarnings.push({
+              lat: c.lat,
+              lng: c.lng,
+              mtbScale: c.mtbScale,
+              name: c.name || 'Severe Technical Singletrack',
+              description: `Singletrail Scale S${c.mtbScale}+ (extreme obstacles, large rock gardens, steep drop-offs >40% grade). Requires advanced bike handling skills.`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const gravelFallbackUsed =
+    activity === 'mountain_bike' &&
+    corridors.some((c) => c.type === 'gravel_path') &&
+    !corridors.some((c) => c.type === 'mtb_trail');
+
   return {
-    coordinates: enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.05),
+    coordinates: finalCoords,
     safeCrossings: bestSafeCrossings,
+    technicalWarnings: technicalWarnings.length > 0 ? technicalWarnings : undefined,
+    gravelFallbackUsed: gravelFallbackUsed || undefined,
   };
 }
 
@@ -1108,7 +1436,12 @@ export async function generateRoadOutAndBackRoute(
   targetDistanceKm: number,
   activity: ActivityType,
   apiConfig?: ApiConfiguration
-): Promise<{ coordinates: [number, number][]; safeCrossings: SafeCrossing[] }> {
+): Promise<{
+  coordinates: [number, number][];
+  safeCrossings: SafeCrossing[];
+  technicalWarnings?: TechnicalSegmentWarning[];
+  gravelFallbackUsed?: boolean;
+}> {
   const latRad = (start.lat * Math.PI) / 180;
   const kmPerLat = 111.0;
   const kmPerLng = 111.0 * Math.cos(latRad);
@@ -1120,10 +1453,36 @@ export async function generateRoadOutAndBackRoute(
   // Discover controlled intersections with lights or stop signs
   const safeCrossings = await discoverSafeCrossings(start, halfTargetKm * 1.4);
 
+  // Margin tolerance: 10% for Mountain Bike, 5% for other activities
+  const toleranceMargin = activity === 'mountain_bike' ? 0.10 : 0.05;
+
   let bearing = Math.random() * 2 * Math.PI;
-  // If corridor exists, pick a bearing pointing towards the greenway / trail cluster
+  // If corridors exist, pick a bearing pointing towards the preferred cluster
   if (corridors.length > 0) {
-    const candidate = corridors[Math.floor(Math.random() * corridors.length)];
+    let preferredPool: CorridorNode[] = [];
+    if (activity === 'mountain_bike') {
+      const mtbNodes = corridors.filter((c) => c.type === 'mtb_trail');
+      const gravelNodes = corridors.filter((c) => c.type === 'gravel_path');
+      // Gracefully fall back to gravel multi-use paths if no mtb singletracks exist
+      preferredPool = mtbNodes.length > 0 ? mtbNodes : gravelNodes;
+    } else if (activity === 'road_bike' || activity === 'bike') {
+      // Road bike MUST never use unpaved trails
+      preferredPool = corridors.filter(
+        (c) =>
+          (c.type === 'bike_lane' || c.type === 'greenway' || c.type === 'quiet_street') &&
+          c.surface !== 'unpaved' &&
+          c.surface !== 'dirt' &&
+          c.surface !== 'gravel' &&
+          c.surface !== 'compacted' &&
+          c.surface !== 'fine_gravel'
+      );
+    } else if (activity === 'run') {
+      preferredPool = corridors.filter((c) => c.type === 'park' || c.type === 'greenway' || c.type === 'sidewalk');
+    } else if (activity === 'hike') {
+      preferredPool = corridors.filter((c) => c.type === 'trail');
+    }
+    const pool = preferredPool.length > 0 ? preferredPool : corridors;
+    const candidate = pool[Math.floor(Math.random() * pool.length)];
     const dLat = candidate.lat - start.lat;
     const dLng = (candidate.lng - start.lng) * Math.cos(latRad);
     bearing = Math.atan2(dLat, dLng);
@@ -1171,16 +1530,51 @@ export async function generateRoadOutAndBackRoute(
       let closestNode: CorridorNode | null = null;
       let minD = Infinity;
       for (const n of corridors) {
+        // Road bike mandate: never select unpaved trail
+        if (activity === 'road_bike' || activity === 'bike') {
+          if (
+            n.surface === 'unpaved' ||
+            n.surface === 'dirt' ||
+            n.surface === 'gravel' ||
+            n.surface === 'compacted' ||
+            n.surface === 'fine_gravel' ||
+            n.type === 'trail' ||
+            n.type === 'mtb_trail' ||
+            n.type === 'gravel_path'
+          ) {
+            continue;
+          }
+        }
+
         const d = calculateDistanceMeters([probeLat, probeLng], [n.lat, n.lng]);
-        if (d < minD && d < probeStraightKm * 1000 * 0.6) {
-          minD = d;
+        if (d >= probeStraightKm * 1000 * 0.6) continue;
+
+        let weight = 1.0;
+        if (activity === 'mountain_bike') {
+          weight = n.type === 'mtb_trail' ? 0.35 : n.type === 'gravel_path' ? 0.45 : n.type === 'trail' ? 0.55 : 1.1;
+        } else if (activity === 'road_bike' || activity === 'bike') {
+          weight = n.type === 'bike_lane' ? 0.4 : n.type === 'greenway' ? 0.5 : 1.0;
+        } else if (activity === 'run') {
+          weight = n.type === 'park' ? 0.4 : n.type === 'greenway' ? 0.5 : n.type === 'sidewalk' ? 0.6 : 1.0;
+        }
+        const weightedD = d * weight;
+        if (weightedD < minD) {
+          minD = weightedD;
           closestNode = n;
         }
       }
       if (closestNode) {
         probeLat = closestNode.lat;
         probeLng = closestNode.lng;
+      } else {
+        const snappedProbe = await snapPointToNearestRoad(probeLat, probeLng, activity);
+        probeLat = snappedProbe[0];
+        probeLng = snappedProbe[1];
       }
+    } else {
+      const snappedProbe = await snapPointToNearestRoad(probeLat, probeLng, activity);
+      probeLat = snappedProbe[0];
+      probeLng = snappedProbe[1];
     }
 
     const activeSafeCrossings = pass <= 1 ? safeCrossings : [];
@@ -1220,9 +1614,41 @@ export async function generateRoadOutAndBackRoute(
         outboundLeg.push(cleanOutbound[i + 1]);
       }
 
-      // 3. Return leg follows the exact verified corridor back to start
-      // This guarantees zero spurs, zero alley detours, zero off-road cuts, and exact total distance
-      const inboundLeg = [...outboundLeg].reverse();
+      // 3. Return leg: find closest path/route that will turn around (e.g. for unidirectional singletracks/oneways)
+      const turnaroundPoint = outboundLeg[outboundLeg.length - 1];
+      let inboundLeg: [number, number][] = [];
+
+      if (activity === 'mountain_bike') {
+        try {
+          // Resolve unidirectional singletracks (oneway=yes / oneway:bicycle=yes) by querying the legal return route
+          const returnPathResult = await fetchRealRoadPath(
+            [turnaroundPoint, [start.lat, start.lng]],
+            activity,
+            apiConfig,
+            false,
+            false,
+            activeSafeCrossings
+          );
+          if (
+            returnPathResult &&
+            returnPathResult.coordinates.length > 2 &&
+            !returnPathResult.hasProhibitedRamps
+          ) {
+            const cleanReturn = eliminateSpursAndInAndOuts(returnPathResult.coordinates, false);
+            if (cleanReturn.length > 1) {
+              inboundLeg = cleanReturn;
+            }
+          }
+        } catch {
+          // Fall back to centerline reverse if network query fails
+        }
+      }
+
+      // If no alternative return required or returned, follow the verified corridor back to start
+      if (inboundLeg.length === 0) {
+        inboundLeg = [...outboundLeg].reverse();
+      }
+
       const combined: [number, number][] = [...outboundLeg, ...inboundLeg.slice(1)];
       const totalDistKm = calculateTotalDistanceKm(combined);
       const diff = Math.abs(totalDistKm - targetDistanceKm);
@@ -1233,8 +1659,8 @@ export async function generateRoadOutAndBackRoute(
         bestSafeCrossings = outResult.safeCrossings || [];
       }
 
-      // 5% mandate tolerance check
-      if (diff / targetDistanceKm <= 0.05) {
+      // Distance margin check (10% for MTB, 5% for others)
+      if (diff / targetDistanceKm <= toleranceMargin) {
         break;
       }
     }
@@ -1248,9 +1674,44 @@ export async function generateRoadOutAndBackRoute(
     bestCoords = [p1, p2, p1];
   }
 
+  const finalCoords = enforceDistanceTolerance(bestCoords, targetDistanceKm, toleranceMargin);
+
+  // Technical difficulty flagging (mtb:scale 3+) on route
+  const technicalWarnings: TechnicalSegmentWarning[] = [];
+  if (activity === 'mountain_bike') {
+    for (const c of corridors) {
+      if (c.mtbScale && c.mtbScale >= 3) {
+        const isNear = finalCoords.some(
+          ([rLat, rLng]) => calculateDistanceMeters([rLat, rLng], [c.lat, c.lng]) <= 250
+        );
+        if (isNear) {
+          const exists = technicalWarnings.some(
+            (tw) => calculateDistanceMeters([tw.lat, tw.lng], [c.lat, c.lng]) <= 50
+          );
+          if (!exists) {
+            technicalWarnings.push({
+              lat: c.lat,
+              lng: c.lng,
+              mtbScale: c.mtbScale,
+              name: c.name || 'Severe Technical Singletrack',
+              description: `Singletrail Scale S${c.mtbScale}+ (extreme obstacles, large rock gardens, steep drop-offs >40% grade). Requires advanced bike handling skills.`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const gravelFallbackUsed =
+    activity === 'mountain_bike' &&
+    corridors.some((c) => c.type === 'gravel_path') &&
+    !corridors.some((c) => c.type === 'mtb_trail');
+
   return {
-    coordinates: enforceDistanceTolerance(bestCoords, targetDistanceKm, 0.05),
+    coordinates: finalCoords,
     safeCrossings: bestSafeCrossings,
+    technicalWarnings: technicalWarnings.length > 0 ? technicalWarnings : undefined,
+    gravelFallbackUsed: gravelFallbackUsed || undefined,
   };
 }
 
@@ -1449,6 +1910,14 @@ export function calculateWorkoutStats(
       speedKmh = 10.2;
       met = 9.8;
       break;
+    case 'road_bike':
+      speedKmh = 23.5;
+      met = 8.0;
+      break;
+    case 'mountain_bike':
+      speedKmh = 14.5;
+      met = 8.5;
+      break;
     case 'bike':
       speedKmh = 21.5;
       met = 7.5;
@@ -1503,6 +1972,8 @@ export async function generateFullRoute(params: {
   let rawCoordinates: [number, number][] = [];
   let confidenceScore: number | undefined = undefined;
   let safeCrossings: SafeCrossing[] = [];
+  let technicalWarnings: TechnicalSegmentWarning[] | undefined = undefined;
+  let gravelFallbackUsed: boolean | undefined = undefined;
 
   // 1. GPS Art Generation
   if (routeType === 'gps_art') {
@@ -1525,6 +1996,8 @@ export async function generateFullRoute(params: {
     );
     rawCoordinates = loopResult.coordinates;
     safeCrossings = loopResult.safeCrossings;
+    technicalWarnings = loopResult.technicalWarnings;
+    gravelFallbackUsed = loopResult.gravelFallbackUsed;
   } else {
     // 3. Real Road Out-and-Back Route
     const outBackResult = await generateRoadOutAndBackRoute(
@@ -1535,6 +2008,8 @@ export async function generateFullRoute(params: {
     );
     rawCoordinates = outBackResult.coordinates;
     safeCrossings = outBackResult.safeCrossings;
+    technicalWarnings = outBackResult.technicalWarnings;
+    gravelFallbackUsed = outBackResult.gravelFallbackUsed;
   }
 
   const actualDistanceKm = calculateTotalDistanceKm(rawCoordinates);
@@ -1566,25 +2041,40 @@ export async function generateFullRoute(params: {
     safeCrossingCount: safeCrossings.length,
   };
 
+  const activityLabel =
+    activity === 'road_bike'
+      ? 'Road Bike'
+      : activity === 'mountain_bike'
+      ? 'Mountain Bike'
+      : activity === 'run'
+      ? 'Run'
+      : activity === 'hike'
+      ? 'Hike'
+      : 'Bike';
+
   const defaultName =
     routeName?.trim() ||
     (routeType === 'gps_art'
       ? `GPS Art "${(gpsArtText || 'RUN').toUpperCase()}" (${finalStats.distanceKm} km)`
-      : `${activity.toUpperCase()} ${routeType === 'loop' ? 'Loop' : 'Out & Back'} (${finalStats.distanceKm} km)`);
+      : `${activityLabel} ${routeType === 'loop' ? 'Loop' : 'Out & Back'} (${finalStats.distanceKm} km)`);
 
   const terrainFocus =
     activity === 'run'
-      ? '🌿 Greenbelts, Greenways & Sidewalks'
-      : activity === 'hike'
-      ? '🥾 Actual Nature Trails & Singletracks'
-      : '🚴 Cycleways & Low-Traffic Corridors';
+      ? '🌿 Greenbelts, Parks, Sidewalks & Quiet Streets'
+      : activity === 'road_bike' || activity === 'bike'
+      ? '🚴 Designated Bike Lanes & Paved Greenways'
+      : activity === 'mountain_bike'
+      ? '🚵 Dirt Trails, Singletracks & Forest Paths via Road Connectors'
+      : '🥾 Actual Nature Trails & Singletracks';
 
   const surfaceType =
     activity === 'run'
-      ? 'Paved Greenways, Sidewalks & Quiet Streets'
-      : activity === 'hike'
-      ? 'Natural Dirt Trails, Forest Footpaths & Mountain Tracks'
-      : 'Smooth Paved Asphalt & Dedicated Bike Lanes';
+      ? 'Paved Greenways, Dedicated Pedestrian Paths & Low-Traffic Neighborhood Roads'
+      : activity === 'road_bike' || activity === 'bike'
+      ? 'Smooth Paved Asphalt, Protected Cycle Tracks & Low-Stress Corridors'
+      : activity === 'mountain_bike'
+      ? 'Unpaved Singletracks, Natural Trails, Dirt Tracks & Connecting Roads'
+      : 'Natural Dirt Trails, Forest Footpaths & Mountain Tracks';
 
   return {
     id: `route_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
@@ -1597,6 +2087,8 @@ export async function generateFullRoute(params: {
     stats: finalStats,
     privacy: privacyInfo,
     safeCrossings,
+    technicalWarnings,
+    gravelFallbackUsed,
     terrainFocus,
     surfaceType,
     createdAt: new Date().toISOString(),

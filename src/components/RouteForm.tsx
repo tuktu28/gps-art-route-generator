@@ -23,6 +23,7 @@ import {
   Search,
   Shield,
   Sparkles,
+  Trees,
   Type,
   Zap,
 } from 'lucide-react';
@@ -312,30 +313,37 @@ export const RouteForm: React.FC<RouteFormProps> = ({
       {/* 2. Activity Selector */}
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-semibold text-stone-700 dark:text-stone-300">Activity Type</label>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {(
             [
               { id: 'run', label: 'Run', icon: Footprints, color: 'text-[#2D4F3E] dark:text-[#7EB89B]' },
-              { id: 'bike', label: 'Bike', icon: Bike, color: 'text-[#C86432]' },
+              { id: 'road_bike', label: 'Road Bike', icon: Bike, color: 'text-[#C86432]' },
+              { id: 'mountain_bike', label: 'Mountain Bike', icon: Trees, color: 'text-sky-600 dark:text-sky-400' },
               { id: 'hike', label: 'Hike', icon: Mountain, color: 'text-[#8C6838]' },
             ] as const
           ).map((item) => {
             const Icon = item.icon;
-            const isSelected = activity === item.id;
+            const isSelected = activity === item.id || (item.id === 'road_bike' && activity === 'bike');
             return (
               <button
                 key={item.id}
                 type="button"
                 id={`activity-btn-${item.id}`}
                 onClick={() => setActivity(item.id)}
-                className={`py-2.5 px-3 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                className={`py-2.5 px-2 rounded-xl border flex flex-col items-center gap-1 transition-all cursor-pointer ${
                   isSelected
-                    ? 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 border-[#2D4F3E] dark:border-[#5C8E76] shadow-sm text-[#2D4F3E] dark:text-[#E8EAE6] font-semibold'
+                    ? item.id === 'mountain_bike'
+                      ? 'bg-sky-500/10 dark:bg-sky-500/20 border-sky-600 dark:border-sky-500 shadow-sm text-sky-800 dark:text-sky-300 font-semibold'
+                      : item.id === 'road_bike'
+                      ? 'bg-[#C86432]/10 dark:bg-[#C86432]/25 border-[#C86432] shadow-sm text-[#C86432] font-semibold'
+                      : item.id === 'hike'
+                      ? 'bg-[#8C6838]/10 dark:bg-[#8C6838]/25 border-[#8C6838] shadow-sm text-[#8C6838] dark:text-[#DFBD84] font-semibold'
+                      : 'bg-[#2D4F3E]/10 dark:bg-[#3D6B56]/25 border-[#2D4F3E] dark:border-[#5C8E76] shadow-sm text-[#2D4F3E] dark:text-[#E8EAE6] font-semibold'
                     : 'bg-white dark:bg-[#19201D] border-[#E5DFD3] dark:border-[#2E3C34] text-stone-600 dark:text-stone-400 hover:bg-[#F4EFE6] dark:hover:bg-[#25302A]'
                 }`}
               >
                 <Icon className={`w-4 h-4 ${isSelected ? item.color : 'text-stone-400'}`} />
-                <span className="text-xs">{item.label}</span>
+                <span className="text-xs text-center font-medium">{item.label}</span>
               </button>
             );
           })}
@@ -346,7 +354,25 @@ export const RouteForm: React.FC<RouteFormProps> = ({
           <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#2D4F3E]/8 dark:bg-[#3D6B56]/15 border border-[#2D4F3E]/20 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
             <Footprints className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B] shrink-0 mt-0.5" />
             <span>
-              <strong className="text-[#2D4F3E] dark:text-[#7EB89B]">Greenbelt & Sidewalk Priority:</strong> Routes bias through greenways, parks, sidewalks, and quiet neighborhood streets while avoiding heavy traffic.
+              <strong className="text-[#2D4F3E] dark:text-[#7EB89B]">Greenway, Park & Sidewalk Priority:</strong> Takes calm roads to get to greenways, greenbelts, parks, and sidewalks while avoiding heavy traffic, stays on those scenic routes, then returns via quiet neighborhood streets.
+            </span>
+          </div>
+        )}
+
+        {(activity === 'road_bike' || activity === 'bike') && (
+          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#C86432]/10 dark:bg-[#C86432]/20 border border-[#C86432]/30 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
+            <Bike className="w-3.5 h-3.5 text-[#C86432] shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-[#C86432]">Road Bike (Strict Paved):</strong> Prioritizes designated bike lanes, paved greenways, and low-stress bike-friendly roads. Never routes onto unpaved trails, dirt, or loose gravel.
+            </span>
+          </div>
+        )}
+
+        {activity === 'mountain_bike' && (
+          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-sky-500/10 dark:bg-sky-500/15 border border-sky-500/30 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
+            <Trees className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+            <span>
+              <strong className="text-sky-700 dark:text-sky-400">Mountain Bike (±10% Margin):</strong> Seeks singletrack and forest trails with a ±10% distance tolerance. Falls back gracefully to gravel multi-use paths if singletrack is unavailable, and flags technical sections (S3+).
             </span>
           </div>
         )}
@@ -355,16 +381,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
           <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#8C6838]/10 dark:bg-[#8C6838]/20 border border-[#8C6838]/30 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
             <Mountain className="w-3.5 h-3.5 text-[#8C6838] dark:text-[#DFBD84] shrink-0 mt-0.5" />
             <span>
-              <strong className="text-[#8C6838] dark:text-[#DFBD84]">Actual Trail Priority:</strong> Routes seek unpaved nature trails, designated hiking footpaths, nature reserve tracks, and singletracks.
-            </span>
-          </div>
-        )}
-
-        {activity === 'bike' && (
-          <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#C86432]/10 dark:bg-[#C86432]/20 border border-[#C86432]/30 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
-            <Bike className="w-3.5 h-3.5 text-[#C86432] shrink-0 mt-0.5" />
-            <span>
-              <strong className="text-[#C86432]">Cycleway Priority:</strong> Routes prioritize designated bike lanes, paved greenways, and low-stress bike-friendly roads.
+              <strong className="text-[#8C6838] dark:text-[#DFBD84]">Nature Trail Priority:</strong> Routes seek unpaved nature trails, designated hiking footpaths, nature reserve tracks, and elevation singletracks.
             </span>
           </div>
         )}
