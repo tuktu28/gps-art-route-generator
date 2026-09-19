@@ -1,4 +1,4 @@
-export type ActivityType = 'run' | 'bike' | 'hike';
+export type ActivityType = 'run' | 'road_bike' | 'mountain_bike' | 'bike' | 'hike';
 export type RouteType = 'loop' | 'out_and_back' | 'gps_art';
 export type DistanceUnit = 'km' | 'mi';
 export type ElevationPreference = 'flat' | 'moderate' | 'hilly';
@@ -38,6 +38,14 @@ export interface SafeCrossing {
   roadName?: string;
 }
 
+export interface TechnicalSegmentWarning {
+  lat: number;
+  lng: number;
+  mtbScale: number;
+  name?: string;
+  description: string;
+}
+
 export interface PrivacyMaskInfo {
   applied: boolean;
   strategy: 'truncate_500m' | 'jitter_500m' | 'none';
@@ -59,6 +67,8 @@ export interface GeneratedRoute {
   stats: RouteStats;
   privacy: PrivacyMaskInfo;
   safeCrossings?: SafeCrossing[];
+  technicalWarnings?: TechnicalSegmentWarning[];
+  gravelFallbackUsed?: boolean;
   terrainFocus?: string;
   surfaceType?: string;
   createdAt: string;

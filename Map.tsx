@@ -162,6 +162,7 @@ export const Map: React.FC<MapProps> = ({
   const clickMarkerRef = useRef<L.Marker | null>(null);
   const directionalMarkersRef = useRef<L.Marker[]>([]);
   const safeCrossingMarkersRef = useRef<L.Marker[]>([]);
+  const technicalWarningMarkersRef = useRef<L.Marker[]>([]);
 
   const [activeTile, setActiveTile] = useState<TileLayerKey>(isDarkMode ? 'dark' : 'outdoors');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -333,6 +334,8 @@ export const Map: React.FC<MapProps> = ({
     directionalMarkersRef.current = [];
     safeCrossingMarkersRef.current.forEach((m) => map.removeLayer(m));
     safeCrossingMarkersRef.current = [];
+    technicalWarningMarkersRef.current.forEach((m) => map.removeLayer(m));
+    technicalWarningMarkersRef.current = [];
 
     if (!route || route.coordinates.length === 0) return;
 
@@ -535,6 +538,38 @@ export const Map: React.FC<MapProps> = ({
           );
 
         safeCrossingMarkersRef.current.push(crossingMarker);
+      });
+    }
+
+    // Render MTB Technical Segment Warnings (mtb:scale 3+)
+    if (route.technicalWarnings && route.technicalWarnings.length > 0) {
+      route.technicalWarnings.forEach((tw) => {
+        const warningIcon = L.divIcon({
+          className: 'mtb-technical-marker',
+          html: `
+            <div class="relative group cursor-pointer flex items-center justify-center">
+              <div class="w-6 h-6 rounded-full bg-amber-500 border-2 border-white dark:border-stone-900 shadow-lg flex items-center justify-center text-white text-[10px] font-black tracking-tight animate-bounce">
+                S${escapeHtml(tw.mtbScale)}+
+              </div>
+            </div>
+          `,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        });
+
+        const twMarker = L.marker([tw.lat, tw.lng], { icon: warningIcon })
+          .addTo(map)
+          .bindPopup(
+            `<div class="p-1.5 font-sans max-w-[220px]">
+              <div class="flex items-center gap-1.5 font-bold text-xs text-amber-600 dark:text-amber-400">
+                <span>⚠️ Technical MTB Trail (Scale S${escapeHtml(tw.mtbScale)}+)</span>
+              </div>
+              <p class="text-[11px] font-semibold text-stone-800 dark:text-stone-100 mt-1">${escapeHtml(tw.name)}</p>
+              <p class="text-[10px] text-stone-600 dark:text-stone-300 mt-1 leading-normal">${escapeHtml(tw.description)}</p>
+            </div>`
+          );
+
+        technicalWarningMarkersRef.current.push(twMarker);
       });
     }
 
