@@ -354,7 +354,7 @@ export const RouteForm: React.FC<RouteFormProps> = ({
           <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[#2D4F3E]/8 dark:bg-[#3D6B56]/15 border border-[#2D4F3E]/20 text-[11px] text-stone-700 dark:text-stone-300 animate-fadeIn">
             <Footprints className="w-3.5 h-3.5 text-[#2D4F3E] dark:text-[#7EB89B] shrink-0 mt-0.5" />
             <span>
-              <strong className="text-[#2D4F3E] dark:text-[#7EB89B]">Greenway, Park & Sidewalk Priority:</strong> Takes calm roads to get to greenways, greenbelts, parks, and sidewalks while avoiding heavy traffic, stays on those scenic routes, then returns via quiet neighborhood streets.
+              <strong className="text-[#2D4F3E] dark:text-[#7EB89B]">Greenway, Park &amp; Calm Road Layout:</strong> Maps paved segments cleanly onto street centerlines (never zig-zagging sidewalks) to minimize watch turn alerts while connecting greenways, greenbelts, and parks.
             </span>
           </div>
         )}
