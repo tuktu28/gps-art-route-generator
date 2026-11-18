@@ -250,17 +250,16 @@ export async function discoverCorridorNodes(
       out center 100;
     `;
   } else {
-    // Running: prioritizes greenways, greenbelts, parks, sidewalks, and quiet neighborhood streets <= 30 mph.
+    // Running: prioritizes greenways, greenbelts, parks, and calm neighborhood street layouts (never zig-zagging sidewalks).
     queryBody = `
       [out:json][timeout:4];
       (
-        way["name"~"greenbelt|greenway|riverwalk|river path",i](around:${radiusMeters},${center.lat},${center.lng});
+        way["name"~"greenbelt|greenway|riverwalk|river path",i]["footway"!~"sidewalk|crossing"](around:${radiusMeters},${center.lat},${center.lng});
         relation["name"~"greenbelt|greenway|riverwalk",i](around:${radiusMeters},${center.lat},${center.lng});
-        way["highway"~"footway|pedestrian|path|cycleway"]["foot"!~"no"]["highway"!~"motorway|trunk|primary|secondary|service|construction"]["aeroway"!~"."](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"cycleway|path|pedestrian|footway"]["footway"!~"sidewalk|crossing|traffic_island|access_aisle"]["foot"!~"no"]["highway"!~"motorway|trunk|primary|secondary|service|construction"]["aeroway"!~"."](around:${radiusMeters},${center.lat},${center.lng});
         way["leisure"~"park|garden|nature_reserve"](around:${radiusMeters},${center.lat},${center.lng});
         way["landuse"~"greenfield|recreation_ground|grass|village_green"](around:${radiusMeters},${center.lat},${center.lng});
-        way["sidewalk"~"yes|both|left|right"]["aeroway"!~"."](around:${radiusMeters},${center.lat},${center.lng});
-        way["highway"~"living_street|residential"]["maxspeed"!~"^(3[1-9]|[4-9][0-9]|[1-9][0-9]{2})"]["aeroway"!~"."](around:${radiusMeters},${center.lat},${center.lng});
+        way["highway"~"living_street|residential|unclassified"]["maxspeed"!~"^(3[1-9]|[4-9][0-9]|[1-9][0-9]{2})"]["aeroway"!~"."](around:${radiusMeters},${center.lat},${center.lng});
         relation["route"~"running|foot"](around:${radiusMeters},${center.lat},${center.lng});
       );
       out center 120;
@@ -307,6 +306,18 @@ export async function discoverCorridorNodes(
 
                   // Mandate: Limit speed limit on all roads to 30mph and under
                   if (isRoadSpeedLimitOver30(el.tags, el.tags?.name)) {
+                    continue;
+                  }
+
+                  // Exclude separate street sidewalks & crosswalks so paved routes follow road centerlines
+                  const footwayTag = (el.tags?.footway || '').toLowerCase();
+                  if (
+                    activity !== 'hike' &&
+                    (footwayTag === 'sidewalk' ||
+                      footwayTag === 'crossing' ||
+                      footwayTag === 'traffic_island' ||
+                      footwayTag === 'access_aisle')
+                  ) {
                     continue;
                   }
 
@@ -384,16 +395,21 @@ export async function discoverCorridorNodes(
                       nodeType = 'quiet_street';
                     }
                   } else if (activity === 'run') {
-                    if (el.tags?.name && /greenbelt|greenway|riverwalk|river path|esplanade/i.test(el.tags.name)) {
+                    if (
+                      (el.tags?.name && /greenbelt|greenway|riverwalk|river path|esplanade/i.test(el.tags.name)) ||
+                      el.tags?.highway === 'cycleway'
+                    ) {
                       nodeType = 'greenway';
                     } else if (el.tags?.leisure === 'park' || el.tags?.leisure === 'garden' || el.tags?.landuse) {
                       nodeType = 'park';
-                    } else if (el.tags?.sidewalk) {
-                      nodeType = 'sidewalk';
-                    } else if (el.tags?.highway === 'residential' || el.tags?.highway === 'living_street') {
+                    } else if (
+                      el.tags?.highway === 'residential' ||
+                      el.tags?.highway === 'living_street' ||
+                      el.tags?.highway === 'unclassified'
+                    ) {
                       nodeType = 'quiet_street';
                     } else {
-                      nodeType = 'greenway';
+                      nodeType = 'quiet_street';
                     }
                   }
 
@@ -631,8 +647,179 @@ export function eliminateSpursAndInAndOuts(
   return clean;
 }
 
+function pointToSegmentDistanceMeters(
+  p: [number, number],
+  a: [number, number],
+  b: [number, number]
+): number {
+  const latRad = (a[0] * Math.PI) / 180;
+  const mPerLat = 111132.0;
+  const mPerLng = 111320.0 * Math.cos(latRad);
+
+  const bx = (b[1] - a[1]) * mPerLng;
+  const by = (b[0] - a[0]) * mPerLat;
+  const px = (p[1] - a[1]) * mPerLng;
+  const py = (p[0] - a[0]) * mPerLat;
+
+  const lenSq = bx * bx + by * by;
+  if (lenSq < 1e-6) return Math.hypot(px, py);
+
+  const t = Math.max(0, Math.min(1, (px * bx + py * by) / lenSq));
+  return Math.hypot(px - t * bx, py - t * by);
+}
+
+function rdpSimplifyRange(
+  points: [number, number][],
+  epsilonMeters: number
+): [number, number][] {
+  if (points.length <= 2) return points;
+
+  let maxDist = 0;
+  let splitIdx = 0;
+  const start = points[0];
+  const end = points[points.length - 1];
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const d = pointToSegmentDistanceMeters(points[i], start, end);
+    if (d > maxDist) {
+      maxDist = d;
+      splitIdx = i;
+    }
+  }
+
+  if (maxDist > epsilonMeters && splitIdx > 0 && splitIdx < points.length - 1) {
+    const left = rdpSimplifyRange(points.slice(0, splitIdx + 1), epsilonMeters);
+    const right = rdpSimplifyRange(points.slice(splitIdx), epsilonMeters);
+    return [...left.slice(0, -1), ...right];
+  }
+
+  return [start, end];
+}
+
 /**
- * Fetch real-world road snapped path using HeiGIT / OpenRouteService or public OpenStreetMap OSRM
+ * Eliminates small lateral sidewalk/curb-cut jogs, driveway bumps, and collinear jitter
+ * along straight road corridors while preserving true street intersections and smooth road curves.
+ * Dramatically reduces false left/right smartwatch turn alerts on GPX exports.
+ */
+export function minimizeMicroTurns(
+  coordinates: [number, number][],
+  isClosedCircuit: boolean = false
+): [number, number][] {
+  if (!coordinates || coordinates.length < 4) return coordinates || [];
+
+  let pts: [number, number][] = [...coordinates];
+
+  // Pass 1: Remove parallel lateral curb-cut / sidewalk / crosswalk-island bumps
+  // (where entry and exit headings are aligned within 22° and lateral excursion <= 6m)
+  let changed = true;
+  let passes = 0;
+  while (changed && passes < 4) {
+    changed = false;
+    passes++;
+
+    for (let i = 1; i < pts.length - 3; i++) {
+      // Find stable anchor before i (~8m+ back)
+      let prevIdx = i - 1;
+      while (prevIdx > 0 && calculateDistanceMeters(pts[prevIdx], pts[i]) < 8) {
+        prevIdx--;
+      }
+      if (calculateDistanceMeters(pts[prevIdx], pts[i]) < 6) continue;
+      const headingBefore = calculateHeadingDeg(pts[prevIdx], pts[i]);
+
+      let removed = false;
+      for (let j = Math.min(pts.length - 2, i + 12); j >= i + 2; j--) {
+        const chordM = calculateDistanceMeters(pts[i], pts[j]);
+        if (chordM < 8 || chordM > 75) continue;
+
+        // Find stable anchor after j (~8m+ ahead)
+        let nextIdx = j + 1;
+        while (nextIdx < pts.length - 1 && calculateDistanceMeters(pts[j], pts[nextIdx]) < 8) {
+          nextIdx++;
+        }
+        if (calculateDistanceMeters(pts[j], pts[nextIdx]) < 6) continue;
+
+        const headingChord = calculateHeadingDeg(pts[i], pts[j]);
+        const headingAfter = calculateHeadingDeg(pts[j], pts[nextIdx]);
+
+        // Only flatten when the corridor continues in the same direction (never flatten 45°/90° turns or U-turns)
+        if (
+          calculateAngleDelta(headingBefore, headingChord) > 22 ||
+          calculateAngleDelta(headingChord, headingAfter) > 22 ||
+          calculateAngleDelta(headingBefore, headingAfter) > 22
+        ) {
+          continue;
+        }
+
+        let maxDevM = 0;
+        let subPathM = 0;
+        for (let k = i + 1; k < j; k++) {
+          const dev = pointToSegmentDistanceMeters(pts[k], pts[i], pts[j]);
+          if (dev > maxDevM) maxDevM = dev;
+        }
+        for (let k = i; k < j; k++) {
+          subPathM += calculateDistanceMeters(pts[k], pts[k + 1]);
+        }
+
+        if (maxDevM > 0.3 && maxDevM <= 6.0 && subPathM <= chordM + 10.0) {
+          pts.splice(i + 1, j - i - 1);
+          changed = true;
+          removed = true;
+          break;
+        }
+      }
+      if (removed) break;
+    }
+  }
+
+  // Pass 2: Tight 1.6m RDP simplification to remove collinear node wobble without clipping corners
+  if (pts.length >= 4) {
+    if (isClosedCircuit && calculateDistanceMeters(pts[0], pts[pts.length - 1]) <= 60) {
+      const mid = Math.floor(pts.length / 2);
+      const firstHalf = rdpSimplifyRange(pts.slice(0, mid + 1), 1.6);
+      const secondHalf = rdpSimplifyRange(pts.slice(mid), 1.6);
+      pts = [...firstHalf.slice(0, -1), ...secondHalf];
+    } else {
+      pts = rdpSimplifyRange(pts, 1.6);
+    }
+  }
+
+  return pts;
+}
+
+/**
+ * Counts actual significant turns (>= 30° heading change across >= 15m legs)
+ */
+export function countSignificantTurns(coordinates: [number, number][]): number {
+  if (!coordinates || coordinates.length < 3) return 0;
+
+  let turns = 0;
+  let i = 0;
+  while (i < coordinates.length - 2) {
+    let j = i + 1;
+    while (j < coordinates.length - 1 && calculateDistanceMeters(coordinates[i], coordinates[j]) < 15) {
+      j++;
+    }
+    if (j >= coordinates.length - 1) break;
+
+    let k = j + 1;
+    while (k < coordinates.length - 1 && calculateDistanceMeters(coordinates[j], coordinates[k]) < 15) {
+      k++;
+    }
+
+    const h1 = calculateHeadingDeg(coordinates[i], coordinates[j]);
+    const h2 = calculateHeadingDeg(coordinates[j], coordinates[k]);
+    if (calculateAngleDelta(h1, h2) >= 30) {
+      turns++;
+    }
+    i = j;
+  }
+
+  return turns;
+}
+
+/**
+ * Fetch real-world road snapped path using HeiGIT / OpenRouteService or public OpenStreetMap OSRM.
+ * Prefers road centerlines and paved greenways over zig-zagging sidewalks whenever routing on paved areas.
  */
 export async function fetchRealRoadPath(
   waypoints: [number, number][],
@@ -640,7 +827,8 @@ export async function fetchRealRoadPath(
   apiConfig?: ApiConfiguration,
   skipSpurPruning: boolean = false,
   allowUTurns: boolean = false,
-  safeCrossingNodes: SafeCrossingNode[] = []
+  safeCrossingNodes: SafeCrossingNode[] = [],
+  preferRoadLayout: boolean = false
 ): Promise<{
   coordinates: [number, number][];
   distanceKm: number;
@@ -652,22 +840,24 @@ export async function fetchRealRoadPath(
 } | null> {
   if (waypoints.length < 2) return null;
 
+  const useRoadLayoutProfile = preferRoadLayout || activity !== 'hike';
+
   // 1. Try OpenRouteService / HeiGIT if API key is configured
   const orsKey = apiConfig?.openRouteServiceKey?.trim();
   if (orsKey && orsKey.length > 10) {
     try {
-      // foot-hiking for hiking, foot-walking for running (pedestrian, greenway & sidewalk focus)
-      // cycling-mountain for mountain bike, cycling-road for road bike
+      // For paved road-layout preference (run, road_bike, gps_art), prefer cycling-road/cycling-regular
+      // so ORS routes along street centerlines & paved greenways instead of jagged footway sidewalks.
       const orsProfile =
         activity === 'mountain_bike'
           ? 'cycling-mountain'
-          : activity === 'road_bike'
+          : activity === 'road_bike' || useRoadLayoutProfile
           ? 'cycling-road'
           : isBikeActivity(activity)
           ? 'cycling-regular'
           : activity === 'hike'
           ? 'foot-hiking'
-          : 'foot-walking';
+          : 'cycling-road';
 
       const endpoints = [
         `https://api.openrouteservice.org/v2/directions/${orsProfile}/geojson`,
@@ -707,9 +897,10 @@ export async function fetchRealRoadPath(
               const geoCoords: [number, number][] = data.features[0].geometry.coordinates.map(
                 ([lng, lat]: [number, number]) => [lat, lng]
               );
-              const cleanCoords = skipSpurPruning
+              const pruned = skipSpurPruning
                 ? geoCoords
                 : eliminateSpursAndInAndOuts(geoCoords, false);
+              const cleanCoords = minimizeMicroTurns(pruned, false);
               const distKm = calculateTotalDistanceKm(cleanCoords);
 
               return {
@@ -732,10 +923,12 @@ export async function fetchRealRoadPath(
   // 2. Query Public OpenStreetMap OSRM Routing Engines (Free, accurate real-road routing)
   const coordString = waypoints.map(([lat, lng]) => `${lng.toFixed(6)},${lat.toFixed(6)}`).join(';');
 
-  // Profiles based on activity:
-  // - road_bike: routed-bike prioritizes smooth asphalt, bike lanes, paved greenways
-  // - mountain_bike: routed-bike with routed-foot fallback allows singletracks and dirt paths
-  // - run / hike: routed-foot prioritizes footways, sidewalks, parks, and calm residential streets
+  // Profiles based on activity & paved road-layout priority:
+  // - road_bike / bike: routed-bike -> bike -> driving (paved road centerlines & greenways, zero sidewalks)
+  // - run (and paved GPS Art): routed-bike -> bike -> driving first so paved routes follow road centerlines
+  //   instead of zig-zagging sidewalks, falling back to routed-foot only for pedestrian-only park links
+  // - mountain_bike: routed-bike with routed-foot fallback for singletracks
+  // - hike: routed-foot for off-road nature trails (or road layout when preferRoadLayout is true)
   const continueStraight = allowUTurns ? '' : '&continue_straight=true';
   const extraParams = `${continueStraight}&steps=true&annotations=true`;
   const osrmEndpoints =
@@ -751,6 +944,14 @@ export async function fetchRealRoadPath(
           `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
           `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson${extraParams}`,
           `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
+        ]
+      : useRoadLayoutProfile
+      ? [
+          `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://router.project-osrm.org/route/v1/bike/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
+          `https://router.project-osrm.org/route/v1/foot/${coordString}?overview=full&geometries=geojson${extraParams}`,
         ]
       : [
           `https://routing.openstreetmap.de/routed-foot/route/v1/driving/${coordString}?overview=full&geometries=geojson${extraParams}`,
@@ -773,9 +974,10 @@ export async function fetchRealRoadPath(
           const rawCoords: [number, number][] = route.geometry.coordinates.map(
             ([lng, lat]: [number, number]) => [lat, lng]
           );
-          const cleanCoords = skipSpurPruning
+          const prunedCoords = skipSpurPruning
             ? rawCoords
             : eliminateSpursAndInAndOuts(rawCoords, false);
+          const cleanCoords = minimizeMicroTurns(prunedCoords, false);
           const distKm = calculateTotalDistanceKm(cleanCoords);
 
           let hasProhibitedRamps = false;
@@ -923,13 +1125,14 @@ export async function fetchRealRoadPath(
 export async function snapPointToNearestRoad(
   lat: number,
   lng: number,
-  activity: ActivityType = 'run'
+  activity: ActivityType = 'run',
+  preferRoadLayout: boolean = false
 ): Promise<[number, number]> {
-  // Road bike MUST snap to drivable paved roads only to prevent snapping onto dirt trails
+  // Prefer paved road centerlines ('driving') rather than sidewalks ('foot') for road/run/GPS-art routes
   const profile =
-    activity === 'road_bike'
+    preferRoadLayout || activity === 'road_bike' || activity === 'run' || activity === 'bike'
       ? 'driving'
-      : isBikeActivity(activity)
+      : activity === 'mountain_bike'
       ? 'bike'
       : 'foot';
   const url = `https://router.project-osrm.org/nearest/v1/${profile}/${lng.toFixed(6)},${lat.toFixed(6)}`;
@@ -959,7 +1162,8 @@ export async function snapWaypointsToRealRoads(
   waypoints: [number, number][],
   activity: ActivityType,
   apiConfig?: ApiConfiguration,
-  allowUTurns: boolean = false
+  allowUTurns: boolean = false,
+  preferRoadLayout: boolean = false
 ): Promise<{ coordinates: [number, number][]; distanceKm: number }> {
   if (waypoints.length < 2) {
     return { coordinates: waypoints, distanceKm: 0 };
@@ -982,7 +1186,7 @@ export async function snapWaypointsToRealRoads(
   // 2. Primary Strategy: Route the entire sequence in ONE seamless OSRM/ORS call
   // OSRM easily handles up to 100 waypoints in a single query and guarantees unbroken road paths
   if (cleanWaypoints.length <= 100) {
-    const fullRoadResult = await fetchRealRoadPath(cleanWaypoints, activity, apiConfig, true, allowUTurns);
+    const fullRoadResult = await fetchRealRoadPath(cleanWaypoints, activity, apiConfig, true, allowUTurns, [], preferRoadLayout);
     if (fullRoadResult && fullRoadResult.coordinates.length >= 2) {
       return fullRoadResult;
     }
@@ -996,20 +1200,20 @@ export async function snapWaypointsToRealRoads(
     const chunk = cleanWaypoints.slice(i, Math.min(cleanWaypoints.length, i + chunkSize));
     if (chunk.length < 2) break;
 
-    let roadResult = await fetchRealRoadPath(chunk, activity, apiConfig, true, allowUTurns);
+    let roadResult = await fetchRealRoadPath(chunk, activity, apiConfig, true, allowUTurns, [], preferRoadLayout);
 
     // If chunk failed, attempt point-to-point sub-segment routing on real streets
     if (!roadResult || roadResult.coordinates.length < 2) {
       const subCoords: [number, number][] = [];
       for (let j = 0; j < chunk.length - 1; j++) {
         const segPair = [chunk[j], chunk[j + 1]];
-        let segResult = await fetchRealRoadPath(segPair, activity, apiConfig, true, allowUTurns);
+        let segResult = await fetchRealRoadPath(segPair, activity, apiConfig, true, allowUTurns, [], preferRoadLayout);
 
         // If direct pair failed, snap both points to nearest OSM road node first
         if (!segResult || segResult.coordinates.length < 2) {
-          const snappedA = await snapPointToNearestRoad(chunk[j][0], chunk[j][1], activity);
-          const snappedB = await snapPointToNearestRoad(chunk[j + 1][0], chunk[j + 1][1], activity);
-          segResult = await fetchRealRoadPath([snappedA, snappedB], activity, apiConfig, true, allowUTurns);
+          const snappedA = await snapPointToNearestRoad(chunk[j][0], chunk[j][1], activity, preferRoadLayout);
+          const snappedB = await snapPointToNearestRoad(chunk[j + 1][0], chunk[j + 1][1], activity, preferRoadLayout);
+          segResult = await fetchRealRoadPath([snappedA, snappedB], activity, apiConfig, true, allowUTurns, [], preferRoadLayout);
         }
 
         if (segResult && segResult.coordinates.length >= 2) {
@@ -1048,7 +1252,7 @@ export async function snapWaypointsToRealRoads(
   // If network routing was completely unavailable, snap all waypoints to nearest streets
   const fallbackSnapped: [number, number][] = [];
   for (const pt of cleanWaypoints) {
-    const snappedPt = await snapPointToNearestRoad(pt[0], pt[1], activity);
+    const snappedPt = await snapPointToNearestRoad(pt[0], pt[1], activity, preferRoadLayout);
     fallbackSnapped.push(snappedPt);
   }
 
@@ -1219,7 +1423,8 @@ export async function generateRoadGpsArtRoute(
     
     try {
       // allowUTurns = true is critical here: drawing text often requires U-turns to trace lines backward
-      const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig, true);
+      // preferRoadLayout = true ensures GPS Art always snaps to clean street centerlines rather than sidewalks
+      const snapped = await snapWaypointsToRealRoads(waypoints, activity, apiConfig, true, true);
       if (snapped && snapped.coordinates.length > 5) {
         return { coords: snapped.coordinates, routedDist: snapped.distanceKm };
       }
@@ -1314,7 +1519,7 @@ function createLoopWaypoints(
       }
     } else if (activity === 'run') {
       const tier1 = corridors.filter((c) => c.type === 'park' || c.type === 'greenway');
-      preferredPool = tier1.length > 0 ? tier1 : corridors.filter((c) => c.type === 'sidewalk');
+      preferredPool = tier1.length > 0 ? tier1 : corridors.filter((c) => c.type === 'quiet_street');
     } else if (activity === 'hike') {
       preferredPool = corridors.filter((c) => c.type === 'trail');
     }
@@ -1439,20 +1644,20 @@ function createLoopWaypoints(
               : 2.0;
         } else if (activity === 'run') {
           if (isCoreWorkout) {
-            // Stay strictly on greenways, parks, sidewalks
+            // Stay on greenways, parks, and calm street layouts (avoid sidewalks)
             weight =
               node.type === 'greenway'
                 ? 0.2
                 : node.type === 'park'
                 ? 0.25
-                : node.type === 'sidewalk'
-                ? 0.5
+                : node.type === 'quiet_street'
+                ? 0.55
                 : 2.2;
           } else {
             // Outbound road to park/greenway, or return road to start
             weight =
               node.type === 'quiet_street'
-                ? 0.5
+                ? 0.45
                 : node.type === 'greenway' || node.type === 'park'
                 ? 0.6
                 : 1.0;
@@ -1592,7 +1797,7 @@ export function buildGreenwayTraversalWaypoints(
   const lastGwPt = greenwayWaypoints[greenwayWaypoints.length - 1];
   const returnQuietNodes = corridors.filter(
     (c) =>
-      (c.type === 'quiet_street' || c.type === 'sidewalk' || c.type === 'park' || c.type === 'greenway') &&
+      (c.type === 'quiet_street' || c.type === 'park' || c.type === 'greenway') &&
       c.surface !== 'unpaved' &&
       c.surface !== 'dirt'
   );
@@ -1780,6 +1985,10 @@ export async function generateRoadLoopRoute(
     }
   }
 
+  // For hike in purely paved areas with zero trail corridors, route along road layout instead of sidewalks
+  const preferRoadLayout =
+    activity !== 'hike' || !corridors.some((c) => c.type === 'trail');
+
   // 2. Calibration loop if not satisfied by preferred corridor traversal
   if (bestCoords.length === 0 || bestDistDiff / targetDistanceKm > toleranceMargin) {
     for (let pass = 1; pass <= 4; pass++) {
@@ -1799,13 +2008,13 @@ export async function generateRoadLoopRoute(
         if (isMtbTrailPt) {
           waypoints.push(pt);
         } else {
-          const snapped = await snapPointToNearestRoad(pt[0], pt[1], activity);
+          const snapped = await snapPointToNearestRoad(pt[0], pt[1], activity, preferRoadLayout);
           waypoints.push(snapped);
         }
       }
       waypoints.push(rawWaypoints[rawWaypoints.length - 1]);
 
-      const result = await fetchRealRoadPath(waypoints, activity, apiConfig, false, false, activeCrossings);
+      const result = await fetchRealRoadPath(waypoints, activity, apiConfig, false, false, activeCrossings, preferRoadLayout);
 
       if (result && result.coordinates.length > 5) {
         if (
@@ -1844,31 +2053,33 @@ export async function generateRoadLoopRoute(
     const rawFbPointers = createLoopWaypoints(start, fallbackRadius, 4, corridors, [], activity);
     const fbWaypoints: [number, number][] = [rawFbPointers[0]];
     for (let w = 1; w < rawFbPointers.length - 1; w++) {
-      const snapped = await snapPointToNearestRoad(rawFbPointers[w][0], rawFbPointers[w][1], activity);
+      const snapped = await snapPointToNearestRoad(rawFbPointers[w][0], rawFbPointers[w][1], activity, preferRoadLayout);
       fbWaypoints.push(snapped);
     }
     fbWaypoints.push(rawFbPointers[rawFbPointers.length - 1]);
 
-    const fbResult = await fetchRealRoadPath(fbWaypoints, activity, apiConfig, false, true, []);
+    const fbResult = await fetchRealRoadPath(fbWaypoints, activity, apiConfig, false, true, [], preferRoadLayout);
     if (fbResult && fbResult.coordinates.length > 2) {
       bestCoords = eliminateSpursAndInAndOuts(fbResult.coordinates, true);
     } else {
       // Fallback out-and-back along nearest verified road
-      const snappedStart = await snapPointToNearestRoad(start.lat, start.lng, activity);
+      const snappedStart = await snapPointToNearestRoad(start.lat, start.lng, activity, preferRoadLayout);
       const halfKm = targetDistanceKm / 2;
       const testPt = await snapPointToNearestRoad(
         start.lat + (halfKm / 111) * 0.7,
         start.lng + (halfKm / (111 * Math.cos((start.lat * Math.PI) / 180))) * 0.7,
-        activity
+        activity,
+        preferRoadLayout
       );
-      const directRoad = await fetchRealRoadPath([snappedStart, testPt], activity, apiConfig, false, true, []);
+      const directRoad = await fetchRealRoadPath([snappedStart, testPt], activity, apiConfig, false, true, [], preferRoadLayout);
       if (directRoad && directRoad.coordinates.length > 1) {
         bestCoords = [...directRoad.coordinates, ...[...directRoad.coordinates].reverse().slice(1)];
       }
     }
   }
 
-  const finalCoords = enforceDistanceTolerance(bestCoords, targetDistanceKm, toleranceMargin);
+  const smoothedCoords = minimizeMicroTurns(bestCoords, true);
+  const finalCoords = enforceDistanceTolerance(smoothedCoords, targetDistanceKm, toleranceMargin);
 
   // Technical difficulty flagging (mtb:scale 3+) on route
   const technicalWarnings: TechnicalSegmentWarning[] = [];
@@ -1962,7 +2173,7 @@ export async function generateRoadOutAndBackRoute(
       }
     } else if (activity === 'run') {
       const tier1 = corridors.filter((c) => c.type === 'park' || c.type === 'greenway');
-      preferredPool = tier1.length > 0 ? tier1 : corridors.filter((c) => c.type === 'sidewalk');
+      preferredPool = tier1.length > 0 ? tier1 : corridors.filter((c) => c.type === 'quiet_street');
     } else if (activity === 'hike') {
       preferredPool = corridors.filter((c) => c.type === 'trail');
     }
@@ -1999,6 +2210,9 @@ export async function generateRoadOutAndBackRoute(
   let bestCoords: [number, number][] = [];
   let bestSafeCrossings: SafeCrossing[] = [];
   let bestDiff = Infinity;
+
+  const preferRoadLayout =
+    activity !== 'hike' || !corridors.some((c) => c.type === 'trail');
 
   // 1. Prioritize greenway / greenbelt out-and-back traversal for running and road bike
   if (activity === 'run' || activity === 'road_bike') {
@@ -2103,7 +2317,7 @@ export async function generateRoadOutAndBackRoute(
           } else if (activity === 'road_bike' || activity === 'bike') {
             weight = n.type === 'bike_lane' ? 0.25 : n.type === 'greenway' ? 0.35 : 1.5;
           } else if (activity === 'run') {
-            weight = n.type === 'greenway' ? 0.2 : n.type === 'park' ? 0.25 : n.type === 'sidewalk' ? 0.5 : 2.0;
+            weight = n.type === 'greenway' ? 0.2 : n.type === 'park' ? 0.25 : n.type === 'quiet_street' ? 0.5 : 2.0;
           }
           const weightedD = d * weight;
           if (weightedD < minD) {
@@ -2115,12 +2329,12 @@ export async function generateRoadOutAndBackRoute(
           probeLat = closestNode.lat;
           probeLng = closestNode.lng;
         } else {
-          const snappedProbe = await snapPointToNearestRoad(probeLat, probeLng, activity);
+          const snappedProbe = await snapPointToNearestRoad(probeLat, probeLng, activity, preferRoadLayout);
           probeLat = snappedProbe[0];
           probeLng = snappedProbe[1];
         }
       } else {
-        const snappedProbe = await snapPointToNearestRoad(probeLat, probeLng, activity);
+        const snappedProbe = await snapPointToNearestRoad(probeLat, probeLng, activity, preferRoadLayout);
         probeLat = snappedProbe[0];
         probeLng = snappedProbe[1];
       }
@@ -2132,7 +2346,8 @@ export async function generateRoadOutAndBackRoute(
         apiConfig,
         false,
         false,
-        activeSafeCrossings
+        activeSafeCrossings,
+        preferRoadLayout
       );
 
       if (outResult && outResult.coordinates.length > 2) {
@@ -2220,20 +2435,22 @@ export async function generateRoadOutAndBackRoute(
 
   // Guaranteed real-road fallback: NEVER return straight lines
   if (bestCoords.length === 0) {
-    const snappedStart = await snapPointToNearestRoad(start.lat, start.lng, activity);
+    const snappedStart = await snapPointToNearestRoad(start.lat, start.lng, activity, preferRoadLayout);
     const probeTargetKm = halfTargetKm;
     const testPt = await snapPointToNearestRoad(
       start.lat + (probeTargetKm / kmPerLat) * Math.sin(bearing),
       start.lng + (probeTargetKm / kmPerLng) * Math.cos(bearing),
-      activity
+      activity,
+      preferRoadLayout
     );
-    const directRoad = await fetchRealRoadPath([snappedStart, testPt], activity, apiConfig, false, true, []);
+    const directRoad = await fetchRealRoadPath([snappedStart, testPt], activity, apiConfig, false, true, [], preferRoadLayout);
     if (directRoad && directRoad.coordinates.length > 1) {
       bestCoords = [...directRoad.coordinates, ...[...directRoad.coordinates].reverse().slice(1)];
     }
   }
 
-  const finalCoords = enforceDistanceTolerance(bestCoords, targetDistanceKm, toleranceMargin);
+  const smoothedCoords = minimizeMicroTurns(bestCoords, true);
+  const finalCoords = enforceDistanceTolerance(smoothedCoords, targetDistanceKm, toleranceMargin);
 
   // Technical difficulty flagging (mtb:scale 3+) on route
   const technicalWarnings: TechnicalSegmentWarning[] = [];
@@ -2571,6 +2788,12 @@ export async function generateFullRoute(params: {
     gravelFallbackUsed = outBackResult.gravelFallbackUsed;
   }
 
+  // Smooth out micro-jags across all route modes so smartwatches don't fire unnecessary turn alerts
+  const isClosed =
+    rawCoordinates.length >= 2 &&
+    calculateDistanceMeters(rawCoordinates[0], rawCoordinates[rawCoordinates.length - 1]) <= 60;
+  rawCoordinates = minimizeMicroTurns(rawCoordinates, isClosed);
+
   const actualDistanceKm = calculateTotalDistanceKm(rawCoordinates);
 
   // Apply Privacy Masking
@@ -2594,7 +2817,7 @@ export async function generateFullRoute(params: {
     estimatedDurationMinutes: workoutStats.durationMinutes,
     estimatedCalories: workoutStats.calories,
     confidenceScore,
-    turnCount: Math.round(maskedCoordinates.length * 0.35),
+    turnCount: countSignificantTurns(maskedCoordinates),
     highestPointM: eleData.highestM,
     lowestPointM: eleData.lowestM,
     safeCrossingCount: safeCrossings.length,
@@ -2619,7 +2842,7 @@ export async function generateFullRoute(params: {
 
   const terrainFocus =
     activity === 'run'
-      ? '🌿 Greenbelts, Parks, Sidewalks & Quiet Streets'
+      ? '🌿 Greenbelts, Parks & Calm Road Layouts'
       : activity === 'road_bike' || activity === 'bike'
       ? '🚴 Designated Bike Lanes & Paved Greenways'
       : activity === 'mountain_bike'
@@ -2628,9 +2851,9 @@ export async function generateFullRoute(params: {
 
   const surfaceType =
     activity === 'run'
-      ? 'Paved Greenways, Dedicated Pedestrian Paths & Low-Traffic Neighborhood Roads'
+      ? 'Paved Greenways, Park Paths & Smooth Road Centerlines (Sidewalk-Free)'
       : activity === 'road_bike' || activity === 'bike'
-      ? 'Smooth Paved Asphalt, Protected Cycle Tracks & Low-Stress Corridors'
+      ? 'Smooth Paved Asphalt, Protected Cycle Tracks & Low-Stress Road Corridors'
       : activity === 'mountain_bike'
       ? 'Unpaved Singletracks, Natural Trails, Dirt Tracks & Connecting Roads'
       : 'Natural Dirt Trails, Forest Footpaths & Mountain Tracks';
